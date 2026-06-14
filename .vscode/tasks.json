@@ -1,0 +1,19 @@
+{
+  "version": "2.0.0",
+  "tasks": [
+    {
+      "label": "build chessBoardGame",
+      "type": "shell",
+      "command": "D:\\Path\\mingw64\\bin\\cmake.exe",
+      "args": [
+        "--build",
+        "build"
+      ],
+      "problemMatcher": ["$gcc"],
+      "group": {
+        "kind": "build",
+        "isDefault": true
+      }
+    }
+  ]
+}

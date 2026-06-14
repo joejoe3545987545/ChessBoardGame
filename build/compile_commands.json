@@ -1,0 +1,32 @@
+[
+{
+  "directory": "D:/MyProjects/chessBoardGame(1)/chessBoardGame/build",
+  "command": "D:\\Path\\mingw64\\bin\\g++.exe -ID:/MyProjects/chessBoardGame(1)/chessBoardGame/include -isystem D:/SFML-3.0.2/include -std=gnu++17 -o CMakeFiles\\chessBoardGame.dir\\main.cpp.obj -c D:\\MyProjects\\chessBoardGame(1)\\chessBoardGame\\main.cpp",
+  "file": "D:\\MyProjects\\chessBoardGame(1)\\chessBoardGame\\main.cpp",
+  "output": "CMakeFiles\\chessBoardGame.dir\\main.cpp.obj"
+},
+{
+  "directory": "D:/MyProjects/chessBoardGame(1)/chessBoardGame/build",
+  "command": "D:\\Path\\mingw64\\bin\\g++.exe -ID:/MyProjects/chessBoardGame(1)/chessBoardGame/include -isystem D:/SFML-3.0.2/include -std=gnu++17 -o CMakeFiles\\chessBoardGame.dir\\src\\AIPlayer.cpp.obj -c D:\\MyProjects\\chessBoardGame(1)\\chessBoardGame\\src\\AIPlayer.cpp",
+  "file": "D:\\MyProjects\\chessBoardGame(1)\\chessBoardGame\\src\\AIPlayer.cpp",
+  "output": "CMakeFiles\\chessBoardGame.dir\\src\\AIPlayer.cpp.obj"
+},
+{
+  "directory": "D:/MyProjects/chessBoardGame(1)/chessBoardGame/build",
+  "command": "D:\\Path\\mingw64\\bin\\g++.exe -ID:/MyProjects/chessBoardGame(1)/chessBoardGame/include -isystem D:/SFML-3.0.2/include -std=gnu++17 -o CMakeFiles\\chessBoardGame.dir\\src\\Chessboard.cpp.obj -c D:\\MyProjects\\chessBoardGame(1)\\chessBoardGame\\src\\Chessboard.cpp",
+  "file": "D:\\MyProjects\\chessBoardGame(1)\\chessBoardGame\\src\\Chessboard.cpp",
+  "output": "CMakeFiles\\chessBoardGame.dir\\src\\Chessboard.cpp.obj"
+},
+{
+  "directory": "D:/MyProjects/chessBoardGame(1)/chessBoardGame/build",
+  "command": "D:\\Path\\mingw64\\bin\\g++.exe -ID:/MyProjects/chessBoardGame(1)/chessBoardGame/include -isystem D:/SFML-3.0.2/include -std=gnu++17 -o CMakeFiles\\chessBoardGame.dir\\src\\DeckManager.cpp.obj -c D:\\MyProjects\\chessBoardGame(1)\\chessBoardGame\\src\\DeckManager.cpp",
+  "file": "D:\\MyProjects\\chessBoardGame(1)\\chessBoardGame\\src\\DeckManager.cpp",
+  "output": "CMakeFiles\\chessBoardGame.dir\\src\\DeckManager.cpp.obj"
+},
+{
+  "directory": "D:/MyProjects/chessBoardGame(1)/chessBoardGame/build",
+  "command": "D:\\Path\\mingw64\\bin\\g++.exe -ID:/MyProjects/chessBoardGame(1)/chessBoardGame/include -isystem D:/SFML-3.0.2/include -std=gnu++17 -o CMakeFiles\\chessBoardGame.dir\\src\\GameEngine.cpp.obj -c D:\\MyProjects\\chessBoardGame(1)\\chessBoardGame\\src\\GameEngine.cpp",
+  "file": "D:\\MyProjects\\chessBoardGame(1)\\chessBoardGame\\src\\GameEngine.cpp",
+  "output": "CMakeFiles\\chessBoardGame.dir\\src\\GameEngine.cpp.obj"
+}
+]

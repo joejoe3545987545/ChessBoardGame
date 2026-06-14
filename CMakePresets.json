@@ -1,0 +1,25 @@
+{
+  "version": 3,
+  "cmakeMinimumRequired": {
+    "major": 3,
+    "minor": 24,
+    "patch": 0
+  },
+  "configurePresets": [
+    {
+      "name": "windows-mingw",
+      "displayName": "Windows MinGW with SFML",
+      "description": "Use MinGW-w64 g++ and the local SFML SDK installation.",
+      "generator": "Ninja",
+      "binaryDir": "${sourceDir}/build",
+      "environment": {
+        "TEMP": "C:/Temp",
+        "TMP": "C:/Temp"
+      },
+      "cacheVariables": {
+        "CMAKE_CXX_COMPILER": "D:/Path/mingw64/bin/g++.exe",
+        "SFML_ROOT": "D:/SFML-3.0.2"
+      }
+    }
+  ]
+}

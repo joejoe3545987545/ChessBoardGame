@@ -1,0 +1,3 @@
+D:/MyProjects/chessBoardGame(1)/chessBoardGame/build/CMakeFiles/chessBoardGame.dir
+D:/MyProjects/chessBoardGame(1)/chessBoardGame/build/CMakeFiles/edit_cache.dir
+D:/MyProjects/chessBoardGame(1)/chessBoardGame/build/CMakeFiles/rebuild_cache.dir

@@ -1,0 +1,19 @@
+{
+  "version": "0.2.0",
+  "configurations": [
+    {
+      "name": "Launch chessBoardGame",
+      "type": "cppdbg",
+      "request": "launch",
+      "program": "${workspaceFolder}/build/chessBoardGame.exe",
+      "args": [],
+      "stopAtEntry": false,
+      "cwd": "${workspaceFolder}",
+      "environment": [],
+      "externalConsole": true,
+      "MIMode": "gdb",
+      "miDebuggerPath": "D:\\Path\\mingw64\\bin\\gdb.exe",
+      "preLaunchTask": "build chessBoardGame"
+    }
+  ]
+}
