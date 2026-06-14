@@ -157,6 +157,46 @@ GameEngine::GameEngine()
     } else {
         std::cout << "[UI Error] 无法加载卡槽图片素材 CardSlot.png" << std::endl;
     }
+    // ============================================================================
+    // 🌟【修正版】：完美适配 SFML 3.0 规范的读卡器夹层素材初始化
+    // ============================================================================
+    cardReaderBottomTexture = std::make_unique<sf::Texture>();
+    // 💡 1. 必须先通过 loadFromFile 把纹理加载好
+    if (cardReaderBottomTexture->loadFromFile(getEngineAssetPath("assets/CardReader_Bottom.png"))) {
+        cardReaderBottomTexture->setSmooth(true);
+        
+        // 💡 2. 核心修正：创建 Sprite 的时候，直接把已经加载好的纹理 (*cardReaderBottomTexture) 塞进去！
+        cardReaderBottomSprite = std::make_unique<sf::Sprite>(*cardReaderBottomTexture);
+        
+        // 设置中心原点、缩放与位置
+        sf::Vector2u size = cardReaderBottomTexture->getSize();
+        cardReaderBottomSprite->setOrigin({size.x / 2.f, size.y / 2.f});
+        cardReaderBottomSprite->setScale({0.4f, 0.4f});
+        cardReaderBottomSprite->setPosition({640.f, 0.f}); 
+        
+        std::cout << "[🎉 Success] 读卡器底座 CardReader_Bottom 初始化成功！" << std::endl;
+    } else {
+        std::cerr << "[❌ UI Error] 无法加载素材 assets/CardReader_Bottom.png" << std::endl;
+    }
+
+    cardReaderTopTexture = std::make_unique<sf::Texture>();
+    // 💡 3. 同理，顶层也必须先 loadFromFile
+    if (cardReaderTopTexture->loadFromFile(getEngineAssetPath("assets/CardReader_Top.png"))) {
+        cardReaderTopTexture->setSmooth(true);
+        
+        // 💡 4. 核心修正：创建 Sprite 的时候，直接传入顶层纹理 (*cardReaderTopTexture)
+        cardReaderTopSprite = std::make_unique<sf::Sprite>(*cardReaderTopTexture);
+        
+        // 保持严丝合缝的对齐
+        sf::Vector2u size = cardReaderTopTexture->getSize();
+        cardReaderTopSprite->setOrigin({size.x / 2.f, size.y / 2.f});
+        cardReaderTopSprite->setScale({0.4f, 0.4f});
+        cardReaderTopSprite->setPosition({640.f, 0.f}); 
+        
+        std::cout << "[🎉 Success] 读卡器滑盖 CardReader_Top 初始化成功！" << std::endl;
+    } else {
+        std::cerr << "[❌ UI Error] 无法加载素材 assets/CardReader_Top.png" << std::endl;
+    }
     std::cout << "[Info] GameEngine constructed." << std::endl;
 }
 
@@ -485,7 +525,33 @@ bool GameEngine::handleHUDClick(sf::Vector2i mousePos) {
             }
 
             // 状态翻转：原本吸附的则归位，原本在原位的则吸附
-            isCardAttachedToMouse = !isCardAttachedToMouse; 
+            // 检测当前鼠标点击是否精准落在计算出的卡牌包围盒内部
+        if (cardClickRect.contains(mouseClickPos)) {
+            
+            if (!isCardAttachedToMouse) {
+                // 1. 从【静止常驻】 ➡️ 进入【鼠标吸附】
+                sf::Vector2f cardCenter(1080.f, 160.f);
+                cardMouseOffset = mouseClickPos - cardCenter;
+                isCardAttachedToMouse = true;
+                isReturningToSlot = false; // 既然又抓起来了，就掐断之前的归位动画
+            } 
+            else {
+                // 2. 🌟【核心改动】从【鼠标吸附】 ➡️ 【松开卡牌】
+                isCardAttachedToMouse = false; // 鼠标解除吸附
+                
+                // 开启飞回卡槽的动画状态机
+                isReturningToSlot = true; 
+                
+                // ⏳【时序捕捉】立刻抓住卡牌松开瞬间在屏幕上的绝对物理坐标，作为飞回的起点
+                returnStartPos = newCardSprite->getPosition(); 
+                
+                // ⏱️【启动计时】重新启动时钟，开始为这 0.2 秒的原地死寂顿挫停顿时间计时
+                returnDelayClock.restart(); 
+            }
+
+            std::cout << "[Card UI] 区域吸附/释放状态更新！" << std::endl;
+            return true; // 拦截点击，防止穿透落子
+        }
             
             std::cout << "[Card UI] 区域吸附成功！当前卡牌绝对物理范围 X:[1008, 1152] Y:[60, 260]" << std::endl;
             
@@ -911,7 +977,17 @@ void GameEngine::renderGameplay() {
         }
     }
 
-    // 🌟【动态交互层：卡牌实体与文字】
+    // ============================================================================
+    // 🌟【三明治夹层渲染 - 第 1 层：Bottom 底座】
+    // 在卡牌渲染之前，先渲染读卡器的底层，这样卡牌就会叠在读卡器底座的上面
+    // ============================================================================
+    if (currentState == GameState::GAME_PVP || currentState == GameState::GAME_PVE) {
+        if (cardReaderBottomSprite != nullptr) {
+            window.draw(*cardReaderBottomSprite);
+        }
+    }
+
+    // 🌟【动态交互层：卡牌实体与文字（三明治第 2 层）】
     if (currentState == GameState::GAME_PVP || currentState == GameState::GAME_PVE) {
         if (newCardSprite != nullptr) {
             
@@ -959,19 +1035,51 @@ void GameEngine::renderGameplay() {
                     lastHandEmpty = false;
                 }
 
-                // 获取动画当前消耗的时间
+                // 获取出生动画当前消耗的时间
                 float animTime = cardAnimClock.getElapsedTime().asSeconds();
 
-                // 动态位置计算
+                // ============================================================
+                // 🌟【精调版】：支持“原地停顿 0.3s + 柔和缓出弹回”的精确计算
+                // ============================================================
                 sf::Vector2f cardPos;
+                sf::Vector2f targetPos(1080.f, 160.f); // 🎯 卡槽固定中心回归点
+
                 if (isCardAttachedToMouse) {
+                    // 1. 正常吸附鼠标状态
                     sf::Vector2i pixelPos = sf::Mouse::getPosition(window);
                     sf::Vector2f worldPos = window.mapPixelToCoords(pixelPos);
                     cardPos = worldPos - cardMouseOffset;
-                } else {
-                    cardPos = sf::Vector2f(1080.f, 160.f);
+                } 
+                else if (isReturningToSlot) {
+                    // 2. 激活弹回动画状态机中
+                    float returnElapsed = returnDelayClock.getElapsedTime().asSeconds();
+                    
+                    if (returnElapsed < 0.15f) {
+                        // ⏳ 阶段 A：【同步修正】前 0.15 秒，卡牌死死卡在原地不挪窝
+                        cardPos = returnStartPos;
+                    } 
+                    else {
+                        // 🚀 阶段 B：先快后慢的指数级缓出曲线 (Exponential Decay)
+                        sf::Vector2f currentPos = newCardSprite->getPosition();
+                        
+                        // 💡 将速度因子由 0.12f 降低至 0.07f，使得过程更加绵密、丝滑
+                        cardPos.x = currentPos.x + (targetPos.x - currentPos.x) * 0.07f;
+                        cardPos.y = currentPos.y + (targetPos.y - currentPos.y) * 0.07f;
+
+                        // 当绝对距离极其接近（比如小于 0.5 像素）时，宣告彻底到家，关闭回归状态机
+                        float dist = std::sqrt(std::pow(targetPos.x - cardPos.x, 2) + std::pow(targetPos.y - cardPos.y, 2));
+                        if (dist < 0.5f) {
+                            cardPos = targetPos;
+                            isReturningToSlot = false; // 完美优雅谢幕
+                        }
+                    }
+                } 
+                else {
+                    // 3. 常态静止稳定地常驻在卡槽中央
+                    cardPos = targetPos;
                 }
 
+                // 更新卡牌位置并锁死 0.18 的微缩缩放比例
                 newCardSprite->setScale({0.18f, 0.18f});
                 newCardSprite->setPosition(cardPos); 
 
@@ -979,21 +1087,22 @@ void GameEngine::renderGameplay() {
                 sf::Vector2u texSize = newCardTexture.getSize();
 
                 // 🌟 动效一：【0.02秒阶梯式下落裁剪 —— 50阶极客精细度重构版】
-                // 每 0.02 秒为一段，1.0 秒刚好完美细分为 50 段
                 int segmentCount = static_cast<int>(animTime / 0.02f) + 1; 
-                if (segmentCount > 50) segmentCount = 50; // 封顶 50 段，全貌展现
-                if (animTime > 1.0f) segmentCount = 50;   // 超过 1 秒必定全开
+                if (segmentCount > 50) segmentCount = 50; 
+                if (animTime > 1.0f) segmentCount = 50;   
 
-                // 计算当前展现的比例 (1/50, 2/50, ... 到 50/50)
+                // ⏳ 如果处于弹回阶段，并且已经过了 0.3 秒的停顿期，强行保持 50 段全显
+                if (isReturningToSlot && returnDelayClock.getElapsedTime().asSeconds() >= 0.3f) {
+                    segmentCount = 50;
+                }
                 float currentHeightPercent = segmentCount / 50.f;
                 int currentRectHeight = static_cast<int>(texSize.y * currentHeightPercent);
 
                 // 应用 50 阶微级阶梯裁剪矩形
                 newCardSprite->setTextureRect(sf::IntRect({0, 0}, {static_cast<int>(texSize.x), currentRectHeight}));
 
-                // 🌟 动效二：【1.5秒纯白褪去变原色】（完美适配 SFML 3.0 的全局常量写法）
+                // 🌟 动效二：【1.5秒纯白褪去变原色】
                 if (animTime <= 1.5f) {
-                    // 计算纯白褪色的反向进度：一开始是 1.0（全白发光），1.5秒时衰减到 0.0（恢复原色）
                     float whiteProgress = 1.0f - (animTime / 1.5f);
                     if (whiteProgress < 0.f) whiteProgress = 0.f;
 
@@ -1007,7 +1116,6 @@ void GameEngine::renderGameplay() {
                     window.draw(*newCardSprite, sf::BlendAdd);
                 } 
                 else {
-                    // 超过 1.5 秒，动画安全收尾
                     newCardSprite->setColor(sf::Color(255, 255, 255, 255));
                     window.draw(*newCardSprite, sf::BlendAlpha);
                     isAnimatingCard = false;
@@ -1018,29 +1126,24 @@ void GameEngine::renderGameplay() {
                     const auto& currentCard = playerDeck.hand.back();
                     uiText.setFont(cardFont);
 
-                    // 🌟【核心提速改动】：将文字的淡入周期缩短为 0.3 秒完成
-                    // 只要动画一启动，文字就在 0.3 秒内迅速冲向 255 纯色状态，不再拖泥带水
                     float textFadeFactor = animTime / 0.3f; 
                     if (textFadeFactor > 1.f) textFadeFactor = 1.f;
                     uint8_t textAlpha = static_cast<uint8_t>(255 * textFadeFactor);
 
-                    // 1. 名字在第 1 截（前 0.02 秒）露头时就渲染
+                    // 1. 名字在第 1 截露头时就渲染（应用你微调后的最新名字精准坐标）
                     if (segmentCount >= 1) {
                         uiText.setCharacterSize(14); 
                         uiText.setFillColor(sf::Color(255, 255, 255, textAlpha)); 
                         uiText.setString(currentCard.name);
-                        // 💡 应用你微调后的最新名字精准坐标
                         uiText.setPosition({cardPos.x - 26.f, cardPos.y - 82.f}); 
                         window.draw(uiText);
                     }
 
-                    // 2. 描述文字（处于 cardPos.y - 45.f 中上段）
-                    // 在第 20 截（约 0.4 秒，卡牌一扫过该高度）提早展现，并直接应用 0.3 秒的快调淡入
+                    // 2. 描述文字（处于 cardPos.y - 45.f 中上段，应用你满意的描述精准坐标）
                     if (segmentCount >= 20) { 
                         uiText.setCharacterSize(11);
                         uiText.setFillColor(sf::Color(230, 230, 230, textAlpha)); 
                         uiText.setString(currentCard.description);
-                        // 💡 保持你之前满意的描述精准坐标
                         uiText.setPosition({cardPos.x - 44.f, cardPos.y - 45.f}); 
                         window.draw(uiText);
                     }
@@ -1048,18 +1151,25 @@ void GameEngine::renderGameplay() {
                     uiText.setFont(font); // 恢复主系统字体
                 }
             } else {
-                // 如果当前没有触发显示，重置状态标记，让下一次抽卡能重新触发动画
                 lastHandEmpty = true;
             }
         }
     }
 
-    // 🌟【修改：预落子圆环浮现逻辑】
-    // 只有在对局进行中、且 AI 没有在思考、且【鼠标当前没有吸附卡牌】时，才渲染预落子圆环
+    // ============================================================================
+    // 🌟【三明治夹层渲染 - 第 3 层：Top 滑盖】
+    // 最后把读卡器的上盖面板盖在最上面，遮挡住通过它下方的卡牌
+    // ============================================================================
+    if (currentState == GameState::GAME_PVP || currentState == GameState::GAME_PVE) {
+        if (cardReaderTopSprite != nullptr) {
+            window.draw(*cardReaderTopSprite);
+        }
+    }
+
+    // 🌟【预落子圆环浮现逻辑】
     if (currentState == GameState::GAME_PVP || currentState == GameState::GAME_PVE) {
         if (!(currentState == GameState::GAME_PVE && isAiThinking)) {
-            
-            // 🌟 核心判断：只有在鼠标没有抓取卡牌时，才允许棋盘抓取鼠标并绘制提示环
+            // 只有在鼠标没有抓取卡牌时，才允许棋盘抓取鼠标并绘制提示环
             if (!isCardAttachedToMouse) {
                 chessboard.drawHoverRing(window, currentTurn); 
             }

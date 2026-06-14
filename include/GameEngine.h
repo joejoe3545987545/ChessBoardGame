@@ -130,6 +130,16 @@ private:
     sf::Clock cardAnimClock;      // 记录卡牌动画已经播了多久
     bool isAnimatingCard = false; // 当前卡牌是否正处于出场动画中
     bool lastHandEmpty = true;    // 辅助判定：手牌从无到有的瞬间触发时钟
+    // 🌟【新增：卡牌弹回动画状态机控制变量】
+    bool isReturningToSlot = false;   // 卡牌当前是否正处于“弹回卡槽”的动画中
+    sf::Clock returnDelayClock;       // 计时器：用来处理点击后的 0.2 秒静止停顿
+    sf::Vector2f returnStartPos;      // 记录玩家松开点击时，卡牌在屏幕上的那一瞬间的物理坐标
+    // 🌟【新增：读卡器夹层素材】
+    std::unique_ptr<sf::Texture> cardReaderTopTexture;
+    std::unique_ptr<sf::Sprite> cardReaderTopSprite;
+
+    std::unique_ptr<sf::Texture> cardReaderBottomTexture;
+    std::unique_ptr<sf::Sprite> cardReaderBottomSprite;
 };
 
 #endif // GAMEENGINE_H
