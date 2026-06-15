@@ -25,6 +25,8 @@ public:
     bool handleMouseClick(sf::Vector2i mousePos, int turn, int& outRow, int& outCol);
     void placePieceByAI(int row, int col, int turn, int& outRow, int& outCol);
     bool checkWin(int row, int col);
+    void setWinCondition(int player, int cond);  // 设置某方胜利条件（默认 5）
+    int  getWinCondition(int player) const;
     void draw(sf::RenderWindow& window);
 
     // 将棋盘网格坐标转换为像素坐标（外部也可用）
@@ -63,6 +65,9 @@ private:
     sf::Sprite boardSprite;
     sf::Sprite blackSprite;
     sf::Sprite whiteSprite;
+
+    // 胜利条件（每方独立，默认 5 子连星）
+    int winCondition[3] = {0, 5, 5};  // [0] unused, [1]=黑, [2]=白
 
     // 胜利连线相关状态
     bool hasWin = false;

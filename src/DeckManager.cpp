@@ -8,7 +8,7 @@ DeckManager::DeckManager() {
 void DeckManager::initDeck() {
     // 这里先建立一个框架，后续可以从 JSON 读取
     deck.push_back({1, L"连击", L"给予两次落子数", CardEffect::FORCE_DROP, 0});
-    deck.push_back({2, L"规则加固", L"胜利条件变为6子", CardEffect::CHANGE_WIN_RULE, 6});
+    deck.push_back({3, L"隐忍", L"迫使敌方承受：\n六子连星为胜途", CardEffect::CHANGE_WIN_RULE, 6});
 }
 
 void DeckManager::playCard(int index, Chessboard& board) {

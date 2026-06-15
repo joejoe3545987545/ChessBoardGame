@@ -183,6 +183,15 @@ GameEngine::GameEngine()
     } else {
         std::cerr << "[UI Error] 卡槽精灵未初始化，无法设置检测区域。" << std::endl;
     }
+    // 🌟 第二卡槽（卡槽 1 正下方 220px，当前空置备用）
+    if (cardSlotTexture2.loadFromFile(getEngineAssetPath("assets/CardSlot.png"))) {
+        cardSlotTexture2.setSmooth(true);
+        cardSlotSprite2 = new sf::Sprite(cardSlotTexture2);
+        sf::Vector2u slot2Size = cardSlotTexture2.getSize();
+        cardSlotSprite2->setOrigin({slot2Size.x / 2.f, slot2Size.y / 2.f});
+        cardSlotSprite2->setScale({0.25f, 0.25f});
+        cardSlotSprite2->setPosition({1080.f, 486.f});  // 卡槽 1 下方 320px
+    }
     // ============================================================================
     // 🌟【修正版】：完美适配 SFML 3.0 规范的读卡器夹层素材初始化
     // ============================================================================
@@ -231,7 +240,8 @@ GameEngine::~GameEngine()
     menuMusic.stop();
     configMusic.stop();
     battleMusic.stop();
-    winMusic.stop(); 
+    battleMusic02.stop();
+    winMusic.stop();
     failMusic.stop(); 
     if (dropSound) delete dropSound;//释放音频
 
@@ -242,6 +252,7 @@ GameEngine::~GameEngine()
     }
     if (newCardSprite) delete newCardSprite;
     if (cardSlotSprite) delete cardSlotSprite;
+    if (cardSlotSprite2) delete cardSlotSprite2;
     std::cout << "[Info] GameEngine destroyed." << std::endl;
 }
 
@@ -396,17 +407,43 @@ void GameEngine::processEvents() {
                         continue; 
                     }
 
+                    // 🔒 卡牌动画期间禁止棋盘落子
+                    if (isBusyAnimating) continue;
+
                     // 只有没点中任何 HUD (hudIntercepted == false)，才去处理常规棋盘落子逻辑
                     int lastRow = -1, lastCol = -1;
+
+                    // 🌟【行动点前置拦截】：在真正让棋盘落子前，先检查当前玩家手里还有没有允许落子的行动点
+                    if (!hasValidActionPoint(true)) {
+                        std::cout << "[ActionPoint] 拦截落子：当前玩家没有包含【允许下棋】判定的行动点！" << std::endl;
+                        // 既然不能下棋，这次点击事件直接被作废拦截
+                        continue; 
+                    }
+
+                    // 行动点检查通过，允许调用棋盘的原生落子逻辑
                     if (chessboard.handleMouseClick(mousePos, currentTurn, lastRow, lastCol)) {
+                        
+                        // 🌟【行动点核销】：落子物理成功！核销扣除 1 个支持下棋的行动点
+                        consumeActionPoint(true);
+
                         // 音频处理
                         dropSound->play();
                         std::cout << "[Audio] Drop sound played." << std::endl;
 
-                        // 点击成功立刻加入手牌数据系统
+                        // 点击成功立刻加入手牌数据系统（三子或四子连线抽卡）
                         int pattern = chessboard.checkPattern(lastRow, lastCol);
                         if (pattern == 3 || pattern == 4) {
-                            playerDeck.drawCard(); 
+                            playerDeck.drawCard();
+                            handSlotAssign.push_back(1);  // 新卡默认放入槽 1
+                            newCardJustDrawn = true;      // 触发出生动画
+                        }
+                        // 🎵 四子连星 → 危机触发，延长 battle_02 或作为切歌入口
+                        if (pattern == 4) {
+                            if (battleMusicState == BattleMusicState::BATTLE_02) {
+                                addCrisisTime(30.f);
+                            } else if (battleMusicState == BattleMusicState::NORMAL) {
+                                triggerBattleMusic02();
+                            }
                         }
 
                         // 记录历史
@@ -418,11 +455,14 @@ void GameEngine::processEvents() {
                             isGameOver = true;
                             currentState = GameState::GAME_OVER;
                             std::cout << "[Info] Player " << currentTurn << " wins." << std::endl;
-                        } else {
-                            currentTurn = (currentTurn == 1) ? 2 : 1;
-                            turnClock.restart();
+                        } 
+                        else {
+                            // 🌟【行动点核心替换点】：删掉你原先落子后强行换人和重置时钟的代码！
+                            // 移交给我们的总体结算中心。结算中心会判断：点数清零了才换人刷新；点数未清零则锁死倒计时让玩家继续行动。
+                            settleActionPoints();
 
-                            if (currentState == GameState::GAME_PVE && currentTurn != playerColorPref) {
+                            // 🌟【AI适配钩子】：如果结算中心发现行动点真的空了，且已经自动切换到机器回合，则激活AI思考
+                            if (currentState == GameState::GAME_PVE && currentTurn != playerColorPref && currentTurnActionPoints.size() == 1) {
                                 isAiThinking = true;
                                 aiThinkClock.restart();
                             }
@@ -452,6 +492,7 @@ void GameEngine::handleMenuClick(sf::Vector2i mousePos) {
             isGameOver = false;
             savedThisGame = false;
             currentState = GameState::GAME_PVP;
+            initActionPointsForTurn();
             turnClock.restart();
         }
         else if (mousePos.y > menuStartY + 80.f && mousePos.y < menuStartY + 130.f) {
@@ -494,6 +535,7 @@ void GameEngine::handlePVEConfigClick(sf::Vector2i mousePos) {
             isGameOver = false;
             savedThisGame = false;
             currentState = GameState::GAME_PVE;
+            initActionPointsForTurn();
             turnClock.restart();
 
             if (aiPlayer) { delete aiPlayer; aiPlayer = nullptr; }
@@ -514,45 +556,74 @@ void GameEngine::handlePVEConfigClick(sf::Vector2i mousePos) {
 
 bool GameEngine::handleHUDClick(sf::Vector2i mousePos) {
     // 只有当玩家手里确实有卡牌时，才需要进行卡牌的碰撞盒检测
-    if (!playerDeck.hand.empty() && newCardSprite != nullptr) {
+    // 🔒 卡牌动画期间禁止抓取卡牌
+    if (!playerDeck.hand.empty() && newCardSprite != nullptr && !isBusyAnimating) {
         sf::FloatRect cardClickRect;
         
         // 严格锁定你指定的卡牌物理宽高
-        sf::Vector2f cardSize(144.f, 200.f); 
+        sf::Vector2f cardSize(144.f, 200.f);
         sf::Vector2f mouseClickPos(static_cast<float>(mousePos.x), static_cast<float>(mousePos.y));
+        // 各槽独立顶卡索引
+        int slot1Top = -1, slot2Top = -1;
+        for (size_t i = 0; i < handSlotAssign.size(); ++i) {
+            if (handSlotAssign[i] == 1) slot1Top = static_cast<int>(i);
+            else                        slot2Top = static_cast<int>(i);
+        }
 
         if (isCardAttachedToMouse) {
-            // A. 如果卡牌已被吸附随鼠移动：
-            // 此时卡牌的渲染位置是以中心点驱动的：cardPos = worldPos - cardMouseOffset
-            // 那么卡牌的左上角物理起点 = 中心点 - 半个高宽 (72.f, 100.f)
+            // A. 吸附态 — 卡牌跟随鼠标
             sf::Vector2i pixelPos = sf::Mouse::getPosition(window);
             sf::Vector2f worldPos = window.mapPixelToCoords(pixelPos);
             sf::Vector2f currentCardCenter = worldPos - cardMouseOffset;
-            
             cardClickRect = sf::FloatRect(
-                {currentCardCenter.x - 72.f, currentCardCenter.y - 100.f}, 
-                cardSize
-            );
-        } else {
-            // B. 如果卡牌在原位静止：
-            // 严格控制在你指定的绝对范围：X: [1008.f, 1152.f], Y: [60.f, 260.f]
-            // 左上角起点为 (1008.f, 60.f)，高宽为 (144.f, 200.f)
-            cardClickRect = sf::FloatRect({1008.f, 60.f}, cardSize);
+                {currentCardCenter.x - 72.f, currentCardCenter.y - 100.f}, cardSize);
         }
 
-        // 🔍 【只检测一次】当前鼠标点击是否精准落在计算出的卡牌包围盒内部
-        if (cardClickRect.contains(mouseClickPos)) {
-            
-            if (!isCardAttachedToMouse) {
-                // 1. 从【静止常驻】 ➡️ 进入【鼠标吸附】
-                sf::Vector2f cardCenter(1080.f, 160.f);
-                cardMouseOffset = mouseClickPos - cardCenter;
-                isCardAttachedToMouse = true;
-                isReturningToSlot = false; // 既然又抓起来了，就掐断之前的归位动画
-                
-                std::cout << "[Card UI] 区域吸附成功！当前卡牌绝对物理范围 X:[1008, 1152] Y:[60, 260]" << std::endl;
-            } 
-            else {
+        // 🔍 非吸附态拾取：先槽2后槽1，显式计算无lambda
+        if (!isCardAttachedToMouse) {
+            // ── 槽2顶卡 ──
+            if (slot2Top >= 0) {
+                int stack2 = 0;
+                for (int j = 0; j < slot2Top; ++j)
+                    if (handSlotAssign[j] == 2) stack2++;
+                float x2 = 1008.f + stack2 * 5.f;
+                float y2 = 380.f  + stack2 * 5.f;
+                sf::FloatRect r2({x2, y2}, cardSize);
+                if (r2.contains(mouseClickPos)) {
+                    attachedCardIndex = slot2Top;
+                    float cx2 = 1080.f + stack2 * 5.f;
+                    float cy2 = 480.f  + stack2 * 5.f;
+                    cardMouseOffset = mouseClickPos - sf::Vector2f(cx2, cy2);
+                    isCardAttachedToMouse = true;
+                    isReturningToSlot = false;
+                    std::cout << "[Card UI] 吸附槽2顶卡" << std::endl;
+                    return true;
+                }
+            }
+            // ── 槽1顶卡 ──
+            if (slot1Top >= 0) {
+                int stack1 = 0;
+                for (int j = 0; j < slot1Top; ++j)
+                    if (handSlotAssign[j] == 1) stack1++;
+                float x1 = 1008.f + stack1 * 5.f;
+                float y1 = 60.f   + stack1 * 5.f;
+                sf::FloatRect r1({x1, y1}, cardSize);
+                if (r1.contains(mouseClickPos)) {
+                    attachedCardIndex = slot1Top;
+                    float cx1 = 1080.f + stack1 * 5.f;
+                    float cy1 = 160.f  + stack1 * 5.f;
+                    cardMouseOffset = mouseClickPos - sf::Vector2f(cx1, cy1);
+                    isCardAttachedToMouse = true;
+                    isReturningToSlot = false;
+                    std::cout << "[Card UI] 吸附槽1顶卡" << std::endl;
+                    return true;
+                }
+            }
+        }
+
+        // 吸附态点击：松开卡牌
+        if (isCardAttachedToMouse && cardClickRect.contains(mouseClickPos)) {
+            {
                 // 2. 🌟【核心改动】从【鼠标吸附】 ➡️ 【松开卡牌】
                 
                 // 📐 计算当前点击位置到圆形区域中心 (640, 100) 的距离
@@ -561,25 +632,64 @@ bool GameEngine::handleHUDClick(sf::Vector2i mousePos) {
                 float distance = std::sqrt(dx * dx + dy * dy);
 
                 if (distance <= zoneRadius) {
+                    // 🌟【行动点前置拦截】：在触发湮灭（即出牌）前，检查是否拥有"允许出牌"的行动点
+                    if (!hasValidActionPoint(false)) {
+                        // 没有出牌权限 → 拒绝湮灭，改为弹回卡槽
+                        std::cout << "[ActionPoint] 拦截出牌：当前玩家没有包含【允许出牌】判定的行动点！" << std::endl;
+                        isCardAttachedToMouse = false;
+                        isReturningToSlot = true;
+                        returnStartPos = newCardSprite->getPosition();
+                        returnDelayClock.restart();
+                        return true; // 拦截点击
+                    }
+
                     // 🔮 分支甲：点击在圆内 ➡️ 触发湮灭仪式
                     isCardAttachedToMouse = false;
-                    
+
                     annihilateState = CardAnnihilateState::PAUSE_BEFORE; // 激活阶段1：原地停顿0.2s
                     annihilateClock.restart();                           // 启动湮灭专用的独立时钟
-                    
+
+                    // ⏸️ 暂停回合计时器（卡牌动画期间不计时）
+                    if (!isTurnPaused) {
+                        isTurnPaused = true;
+                        pauseClock.restart();
+                    }
+
+                    // 🎵 触发战斗音乐切换到 battle_02
+                    triggerBattleMusic02();
+
+                    // 🔒 锁定玩家操作和 AI（动画期间禁止一切行动）
+                    isBusyAnimating = true;
+
                     std::cout << "[Card UI] 点击在圆内！释放卡牌并触发湮灭仪式。" << std::endl;
                 }
                 else {
-                    // 🔮 分支乙：点击在圆外 ➡️ 走原逻辑：飞回卡槽
-                    isCardAttachedToMouse = false; 
-                    isReturningToSlot = true; 
-                    
-                    // ⏳【时序捕捉】抓住松开瞬间的绝对坐标
-                    returnStartPos = newCardSprite->getPosition(); 
-                    // ⏱️【启动计时】0.2秒原地顿挫
-                    returnDelayClock.restart(); 
-                    
-                    std::cout << "[Card UI] 点击在圆外，放开卡牌，使其飞回卡槽。" << std::endl;
+                    // 🔮 分支乙：点击在圆外 ➡️ 检查是否落在槽位存放区
+                    sf::FloatRect slot1Zone({1008.f, 60.f},  cardSize);
+                    sf::FloatRect slot2Zone({1008.f, 380.f}, cardSize);
+
+                    isCardAttachedToMouse = false;
+                    isReturningToSlot = true;
+                    returnStartPos = newCardSprite->getPosition();
+                    returnDelayClock.restart();
+
+                    if (slot2Zone.contains(mouseClickPos) && attachedCardIndex >= 0) {
+                        Card moved = playerDeck.hand[attachedCardIndex];
+                        playerDeck.hand.erase(playerDeck.hand.begin() + attachedCardIndex);
+                        handSlotAssign.erase(handSlotAssign.begin() + attachedCardIndex);
+                        playerDeck.hand.push_back(moved);
+                        handSlotAssign.push_back(2);
+                        attachedCardIndex = static_cast<int>(playerDeck.hand.size()) - 1;
+                        std::cout << "[Card UI] 存入槽 2" << std::endl;
+                    } else if (slot1Zone.contains(mouseClickPos) && attachedCardIndex >= 0) {
+                        Card moved = playerDeck.hand[attachedCardIndex];
+                        playerDeck.hand.erase(playerDeck.hand.begin() + attachedCardIndex);
+                        handSlotAssign.erase(handSlotAssign.begin() + attachedCardIndex);
+                        playerDeck.hand.push_back(moved);
+                        handSlotAssign.push_back(1);
+                        attachedCardIndex = static_cast<int>(playerDeck.hand.size()) - 1;
+                        std::cout << "[Card UI] 存入槽 1" << std::endl;
+                    }
                 }
             }
 
@@ -596,19 +706,31 @@ bool GameEngine::handleHUDClick(sf::Vector2i mousePos) {
         }
         else if (mousePos.x > 480 && mousePos.x < 600) { // 重新开局
             chessboard.reset();
-            lastHandEmpty = true; // 标记手牌已空，下次有牌时将重新激活出生特效
+            newCardJustDrawn = false;
+            handSlotAssign.clear();
+            attachedCardIndex = -1;
+            isCardAttachedToMouse = false;
+            if (newCardSprite) newCardSprite->setPosition({1080.f, 160.f}); // 复位卡牌精灵到槽 1
             battleMusic.stop();
             battleMusic.play();
+            battleMusic02.stop();                                // 切断 battle_02
+            battleMusicState = BattleMusicState::NORMAL;         // 重置音乐状态机
+            battleMusic.setVolume(BATTLE_VOLUME);                // 确保音量正常
+            isBusyAnimating = false;                             // 解锁动画锁
             winMusic.stop();
             playerDeck.resetDeck();
             
             // 🌟【确切位置 1】：在此处精准添加，保证局内主动点击“重新开局”时隐藏卡牌底图
 
             currentTurn = 1;
+            initActionPointsForTurn();          // 🌟 重新开局时初始化行动点池
+            showcaseState = CardShowcaseState::NONE; // 🌟 重置卡牌展示状态
             isAiThinking = false;
             isGameOver = false;
             savedThisGame = false;
             turnClock.restart();
+            turnTimePaused = 0.f;  // 重置暂停累计
+            isTurnPaused   = false;
             if (currentState == GameState::GAME_PVE && playerColorPref == 2) {
                 isAiThinking = true;
                 aiThinkClock.restart();
@@ -713,12 +835,61 @@ void GameEngine::update() {
         if (static_cast<int>(failMusic.getStatus()) == 2)   failMusic.stop();
     } 
     else if (currentState == GameState::GAME_PVP || currentState == GameState::GAME_PVE) {
-        if (static_cast<int>(battleMusic.getStatus()) != 2) battleMusic.play();
+        // 先停掉非战斗音乐
         if (static_cast<int>(menuMusic.getStatus()) == 2) menuMusic.stop();
         if (static_cast<int>(configMusic.getStatus()) == 2) configMusic.stop();
         if (static_cast<int>(winMusic.getStatus()) == 2)    winMusic.stop();
         if (static_cast<int>(failMusic.getStatus()) == 2)   failMusic.stop();
-    } 
+
+        // ── 战斗音乐状态机 ──
+        switch (battleMusicState) {
+            case BattleMusicState::NORMAL:
+                if (static_cast<int>(battleMusic.getStatus()) != 2) battleMusic.play();
+                battleMusic.setVolume(BATTLE_VOLUME);
+                break;
+
+            case BattleMusicState::SWITCHING_TO_02: {
+                float progress = crossfadeClock.getElapsedTime().asSeconds() / CROSSFADE_DURATION;
+                if (progress >= 1.f) {
+                    battleMusic.setVolume(0.f);
+                    battleMusic02.setVolume(BATTLE_VOLUME);
+                    battleMusicState = BattleMusicState::BATTLE_02;
+                    battle02Remaining = BATTLE_02_BASE_TIME;
+                    battleTimer.restart();
+                } else {
+                    battleMusic.setVolume(BATTLE_VOLUME * (1.f - progress));
+                    battleMusic02.setVolume(BATTLE_VOLUME * progress);
+                }
+                if (static_cast<int>(battleMusic.getStatus()) != 2) battleMusic.play();
+                if (static_cast<int>(battleMusic02.getStatus()) != 2) battleMusic02.play();
+                break;
+            }
+
+            case BattleMusicState::BATTLE_02: {
+                if (battleTimer.getElapsedTime().asSeconds() >= battle02Remaining) {
+                    battleMusicState = BattleMusicState::SWITCHING_TO_01;
+                    crossfadeClock.restart();
+                }
+                if (static_cast<int>(battleMusic02.getStatus()) != 2) battleMusic02.play();
+                break;
+            }
+
+            case BattleMusicState::SWITCHING_TO_01: {
+                float progress = crossfadeClock.getElapsedTime().asSeconds() / CROSSFADE_DURATION;
+                if (progress >= 1.f) {
+                    battleMusic02.setVolume(0.f);
+                    battleMusic.setVolume(BATTLE_VOLUME);
+                    battleMusicState = BattleMusicState::NORMAL;
+                } else {
+                    battleMusic02.setVolume(BATTLE_VOLUME * (1.f - progress));
+                    battleMusic.setVolume(BATTLE_VOLUME * progress);
+                }
+                if (static_cast<int>(battleMusic.getStatus()) != 2) battleMusic.play();
+                if (static_cast<int>(battleMusic02.getStatus()) != 2) battleMusic02.play();
+                break;
+            }
+        }
+    }
     else if (currentState == GameState::GAME_OVER) {
         // 🌟【结算界面音频逻辑】
         if (static_cast<int>(menuMusic.getStatus()) == 2)   menuMusic.stop();
@@ -727,6 +898,9 @@ void GameEngine::update() {
             battleMusic.stop();
             std::cout << "[Audio] 对局结束，切断对战音乐" << std::endl;
         }
+        if (static_cast<int>(battleMusic02.getStatus()) == 2) battleMusic02.stop();
+        battleMusicState = BattleMusicState::NORMAL;   // 重置音乐状态
+        isBusyAnimating = false;                       // 解锁动画锁
 
         // 🌟【核心修复：精准输赢判断】
         bool isPlayerWon = true; 
@@ -794,7 +968,7 @@ void GameEngine::update() {
 
     if (currentState != GameState::GAME_PVP && currentState != GameState::GAME_PVE) return;
 
-    float elapsedSeconds = turnClock.getElapsedTime().asSeconds();
+    float elapsedSeconds = getEffectiveTurnTime();
     if (elapsedSeconds >= 45.f) {
         winReason = (currentTurn == 1) ? L"黑方思考超时，白方获胜！" : L"白方思考超时，黑方获胜！";
         isGameOver = true;
@@ -803,6 +977,9 @@ void GameEngine::update() {
     }
 
     if (currentState == GameState::GAME_PVE && currentTurn != playerColorPref) {
+        // 🔒 卡牌动画期间暂停 AI（不开始新思考，也不落子）
+        if (isBusyAnimating) return;
+
         if (!aiPlayer) {
             std::cerr << "[Warning] aiPlayer was null; recreating..." << std::endl;
             int aiColor = (playerColorPref == 1) ? 2 : 1;
@@ -1003,6 +1180,9 @@ void GameEngine::renderGameplay() {
         if (cardSlotSprite != nullptr) {
             window.draw(*cardSlotSprite);
         }
+        if (cardSlotSprite2 != nullptr) {
+            window.draw(*cardSlotSprite2);
+        }
     }
 
     // ============================================================================
@@ -1015,39 +1195,86 @@ void GameEngine::renderGameplay() {
         }
     }
 
-    // 🌟【动态交互层：卡牌实体与文字（三明治第 2 层）】
+    // 🌟【动态交互层：多卡堆叠渲染】
     if (currentState == GameState::GAME_PVP || currentState == GameState::GAME_PVE) {
-        if (newCardSprite != nullptr) {
-            
-            bool showCard = false; // 默认不显示
+        if (newCardSprite != nullptr && !playerDeck.hand.empty()) {
 
-            // 只要玩家手里通过 checkPattern 成功抽到了卡牌，就激活卡牌显示
-            if (!playerDeck.hand.empty()) {
-                showCard = true;
-            } 
-            else {
-                // 💡 彻底修复：手牌为空时，直接锁死为 false，不进行棋盘扫描
-                // 这样湮灭后卡槽就会干干净净，绝不会生成空白幽灵牌
-                showCard = false; 
+            // 【时序捕获】：抽卡标记触发出生动画（比 handSize 变化更可靠）
+            if (newCardJustDrawn) {
+                cardAnimClock.restart();
+                isAnimatingCard = true;
+                newCardJustDrawn = false;
             }
 
-            // 🌟 只有满足 showCard 条件时，才把卡牌和文字盖在卡槽上面渲染
-            if (showCard) {
-                // 【时序捕获】：当发现手牌刚刚诞生时，一瞬间重置并启动动画时钟
-                if (lastHandEmpty && !playerDeck.hand.empty()) {
-                    cardAnimClock.restart();
-                    isAnimatingCard = true;
-                    lastHandEmpty = false;
+            // 获取出生动画当前消耗的时间（仅顶卡使用）
+            float animTime = cardAnimClock.getElapsedTime().asSeconds();
+
+            // ── 双槽分组渲染 ──
+            // 活跃卡索引：当前被状态机操控的卡（吸附中 / 湮灭中 / 默认顶卡）
+            int activeIdx;
+            if (isCardAttachedToMouse)          activeIdx = attachedCardIndex;
+            else if (annihilateState != CardAnnihilateState::NONE) activeIdx = attachedCardIndex;
+            else if (isReturningToSlot)         activeIdx = attachedCardIndex;
+            else                                activeIdx = static_cast<int>(playerDeck.hand.size() - 1);
+            sf::Vector2f targetPos;
+            sf::Vector2f preLoopPos = newCardSprite->getPosition();
+
+            for (int slot = 1; slot <= 2; ++slot) {
+                float baseX = 1080.f;
+                float baseY = (slot == 1) ? 160.f : 480.f;
+                int stackIdx = 0;
+                for (size_t i = 0; i < playerDeck.hand.size(); ++i) {
+                    if (handSlotAssign[i] != slot) continue;
+                    sf::Vector2f offset(stackIdx * 5.f, stackIdx * 5.f);
+                    sf::Vector2f cardPos(baseX + offset.x, baseY + offset.y);
+
+                    if (static_cast<int>(i) == activeIdx) {
+                        targetPos = cardPos; // 活跃卡回归点
+                    } else {
+                        // 静态卡牌：完整渲染 + 槽顶卡文字
+                        newCardSprite->setScale({0.18f, 0.18f});
+                        newCardSprite->setPosition(cardPos);
+                        sf::Vector2u texSize = newCardTexture.getSize();
+                        newCardSprite->setTextureRect(sf::IntRect({0, 0}, {static_cast<int>(texSize.x), static_cast<int>(texSize.y)}));
+                        newCardSprite->setColor(sf::Color(255, 255, 255, 255));
+                        window.draw(*newCardSprite, sf::BlendAlpha);
+                        // 每张卡都渲染文字，渲染顺序天然保证上层遮下层
+                        {
+                            const auto& sc = playerDeck.hand[i];
+                            uiText.setFont(cardFont);
+                            uiText.setCharacterSize(14);
+                            uiText.setFillColor(sf::Color(255, 255, 255, 255));
+                            uiText.setString(sc.name);
+                            uiText.setPosition({cardPos.x - 26.f, cardPos.y - 82.f});
+                            window.draw(uiText);
+                            uiText.setCharacterSize(11);
+                            uiText.setFillColor(sf::Color(230, 230, 230, 255));
+                            uiText.setString(sc.description);
+                            uiText.setPosition({cardPos.x - 44.f, cardPos.y - 45.f});
+                            window.draw(uiText);
+                            uiText.setFont(font);
+                        }
+                    }
+                    stackIdx++;
                 }
+            }
 
-                // 获取出生动画当前消耗的时间
-                float animTime = cardAnimClock.getElapsedTime().asSeconds();
+            // 恢复精灵到活跃卡的正确位置
+            if (isCardAttachedToMouse) {
+                sf::Vector2i pix = sf::Mouse::getPosition(window);
+                sf::Vector2f wpos = window.mapPixelToCoords(pix);
+                newCardSprite->setPosition(wpos - cardMouseOffset);
+            } else {
+                newCardSprite->setPosition(preLoopPos);
+            }
 
-                // ============================================================
-                // 🌟【新复合精调版】：支持鼠标吸附、弹回以及全新的湮灭仪式计算
-                // ============================================================
-                sf::Vector2f cardPos;
-                sf::Vector2f targetPos(1080.f, 160.f); // 🎯 卡槽固定中心回归点
+            // ── 顶卡：完整状态机 + 动画 + 文字 ──
+
+            // ============================================================
+            // 🌟【新复合精调版】：支持鼠标吸附、弹回以及全新的湮灭仪式计算
+            // ============================================================
+            {
+            sf::Vector2f cardPos;
 
                 if (isCardAttachedToMouse) {
                     // 1. 正常吸附鼠标状态
@@ -1127,75 +1354,92 @@ void GameEngine::renderGameplay() {
                             cardPos = {640.f, 70.f}; 
                             
                             // ============================================================================
-                            // 🔮【另外单写：专属高级湮灭特效渲染通道】
+                            // 🔮 湮灭特效渲染 — 连续插值，无帧率依赖
+                            //    出生：0→50段出现 + 极亮→正常(1.5s)
+                            //    湮灭：连续消失 + 正常→极亮(1.0s)
                             // ============================================================================
-                            float disappearTime = elapsed; // 使用湮灭阶段独立时间
+                            float disappearTime = elapsed;
                             sf::Vector2u texSize = newCardTexture.getSize();
 
-                            // ⏱️ 1. 湮灭裁剪：1秒内50帧，由50逐帧递减归0（从下往上一截截解体消失）
-                            int annihilateSegments = 50 - static_cast<int>(disappearTime / 0.02f);
-                            if (annihilateSegments < 0) annihilateSegments = 0;
-                            if (disappearTime > 1.0f) annihilateSegments = 0;
-
-                            float heightPercent = annihilateSegments / 50.f;
+                            // ⏱️ 1. 湮灭裁剪：连续插值替代固定50段量化，消除帧率拍频闪烁
+                            //    纹理高 1111px，60Hz 每帧 ~18.5px，144Hz 每帧 ~7.7px，始终平滑
+                            float heightPercent = 1.0f - (disappearTime / 1.0f);
+                            if (heightPercent < 0.f) heightPercent = 0.f;
+                            if (disappearTime > 0.98f) heightPercent = 0.f; // 最后 20ms 提前隐藏，消除残影闪烁
                             int currentRectHeight = static_cast<int>(texSize.y * heightPercent);
-                            
-                            // 应用位置、缩放及湮灭专用的裁剪矩形
+
                             newCardSprite->setScale({0.18f, 0.18f});
-                            newCardSprite->setPosition(cardPos); 
+                            newCardSprite->setPosition(cardPos);
                             newCardSprite->setTextureRect(sf::IntRect({0, 0}, {static_cast<int>(texSize.x), currentRectHeight}));
 
-                            // ⏱️ 2. 0.6秒内极速变白变亮进度
-                            float whiteProgress = disappearTime / 0.6f;
+                            // ⏱️ 2. 纯白焚化辉光：原色 → 极亮，1秒内线性递增（镜像出生动画的 1.5s 衰减）
+                            float whiteProgress = disappearTime / 1.0f;   // 0.0 → 1.0
                             if (whiteProgress > 1.f) whiteProgress = 1.f;
 
-                            // ⏱️ 🌟【新增】控制 1.0 秒内整体透明度从 255 降低到 0 的淡出因子
-                            float fadeProgress = 1.0f - (disappearTime / 1.0f);
-                            if (fadeProgress < 0.f) fadeProgress = 0.f;
-                            uint8_t currentAlpha = static_cast<uint8_t>(255 * fadeProgress);
+                            // ⏱️ 尾部软淡出：最后 0.4s 基底 alpha 线性衰减，最后 20ms 强制归零
+                            float baseAlpha = 1.0f;
+                            if (disappearTime > 0.98f) baseAlpha = 0.f;
+                            else if (disappearTime > 0.6f) {
+                                baseAlpha = 1.0f - (disappearTime - 0.6f) / 0.4f;
+                                if (baseAlpha < 0.f) baseAlpha = 0.f;
+                            }
+                            uint8_t finalAlpha = static_cast<uint8_t>(255 * baseAlpha);
 
-                            // 1️⃣ 第一步：渲染底色，让卡牌本体的透明度随时间降低到 0
-                            newCardSprite->setColor(sf::Color(255, 255, 255, currentAlpha)); // 👈 核心修改：Alpha 由 255 改为动态的 currentAlpha
-                            window.draw(*newCardSprite, sf::BlendAlpha); 
+                            // 1️⃣ 基底：尾部渐弱融入辉光
+                            newCardSprite->setColor(sf::Color(255, 255, 255, finalAlpha));
+                            window.draw(*newCardSprite, sf::BlendAlpha);
 
-                            // 2️⃣ 第二步：渲染纯白强光，强光的能量也随着卡牌淡出同步减弱熄灭
-                            uint8_t whiteEmit = static_cast<uint8_t>(255 * whiteProgress * fadeProgress); // 👈 叠加淡出因子
-                            newCardSprite->setColor(sf::Color(whiteEmit, whiteEmit, whiteEmit, 255)); 
-                            window.draw(*newCardSprite, sf::BlendAdd);   
+                            // 2️⃣ 白光叠层：同步尾部收缩，避免残留白影
+                            uint8_t whiteEmit = static_cast<uint8_t>(255 * whiteProgress * baseAlpha);
+                            newCardSprite->setColor(sf::Color(whiteEmit, whiteEmit, whiteEmit, 255));
+                            window.draw(*newCardSprite, sf::BlendAdd);
 
-                            // ⏱️ 3. 专属文字根据裁剪进度和淡出进度同步隐藏与淡出
-                            if (!playerDeck.hand.empty()) {
-                                const auto& currentCard = playerDeck.hand.back();
+                            // ⏱️ 3. 文字：随裁剪进度独立淡出（0.8s 内完全消失，略快于画面）
+                            if (!playerDeck.hand.empty() && activeIdx >= 0) {
+                                const auto& currentCard = playerDeck.hand[activeIdx];
                                 uiText.setFont(cardFont);
 
-                                // 名字：让名字也享有透明度淡出的效果
-                                if (annihilateSegments >= 1) {
-                                    uiText.setCharacterSize(14); 
-                                    uiText.setFillColor(sf::Color(255, 255, 255, currentAlpha)); // 👈 同步应用 currentAlpha
+                                float textFade = 1.0f - (disappearTime / 0.8f);
+                                if (textFade < 0.f) textFade = 0.f;
+                                uint8_t textAlpha = static_cast<uint8_t>(255 * textFade);
+
+                                // 名字：剩余高度 >2% 时可见（连续判定，无帧率依赖）
+                                if (heightPercent > 0.02f) {
+                                    uiText.setCharacterSize(14);
+                                    uiText.setFillColor(sf::Color(255, 255, 255, textAlpha));
                                     uiText.setString(currentCard.name);
-                                    uiText.setPosition({cardPos.x - 26.f, cardPos.y - 82.f}); 
+                                    uiText.setPosition({cardPos.x - 26.f, cardPos.y - 82.f});
                                     window.draw(uiText);
                                 }
 
-                                // 描述文字：跌破20截时隐藏，且隐藏前正常享受淡出
-                                if (annihilateSegments >= 20) { 
+                                // 描述：剩余高度 >40% 时可见
+                                if (heightPercent > 0.40f) {
                                     uiText.setCharacterSize(11);
-                                    uiText.setFillColor(sf::Color(230, 230, 230, currentAlpha)); // 👈 同步应用 currentAlpha
+                                    uiText.setFillColor(sf::Color(230, 230, 230, textAlpha));
                                     uiText.setString(currentCard.description);
-                                    uiText.setPosition({cardPos.x - 44.f, cardPos.y - 45.f}); 
+                                    uiText.setPosition({cardPos.x - 44.f, cardPos.y - 45.f});
                                     window.draw(uiText);
                                 }
-                                uiText.setFont(font); // 还原主系统字体
+                                uiText.setFont(font);
                             }
                             // ============================================================================
-                            
-                            // ⏱️ 动画总长为 1.0 秒，在最后一截彻底归0消失的瞬间，宣告完全湮灭
+
+                            // ⏱️ 动画总长为 1.0 秒，湮灭完成 → 启动卡牌效果展示
                             if (elapsed >= 1.0f) {
-                                if (!playerDeck.hand.empty()) {
-                                    playerDeck.hand.pop_back(); // 正式移出手牌
+                                if (!playerDeck.hand.empty() && attachedCardIndex >= 0) {
+                                    // 🌟 捕获卡牌数据并按索引移出手牌
+                                    showcasedCard = playerDeck.hand[attachedCardIndex];
+                                    playerDeck.hand.erase(playerDeck.hand.begin() + attachedCardIndex);
+                                    handSlotAssign.erase(handSlotAssign.begin() + attachedCardIndex);
+                                    attachedCardIndex = -1;  // 重置吸附索引
                                     std::cout << "[Annihilate] 燃尽并完全淡出，卡牌正式完全湮灭！" << std::endl;
+
+                                    // 🌟 启动效果展示状态机（PAUSE → APPEAR → DISPLAY → FADE_OUT → 触发效果）
+                                    showcaseState = CardShowcaseState::PAUSE;
+                                    showcaseClock.restart();
+                                    newCardSprite->setPosition({640.f, 360.f}); // 消除读卡器残影
                                 }
-                                annihilateState = CardAnnihilateState::NONE; // 关闭状态机
+                                annihilateState = CardAnnihilateState::NONE; // 关闭湮灭状态机
                             }
                             break;
                         }
@@ -1236,16 +1480,15 @@ void GameEngine::renderGameplay() {
                 // 获取纹理的原始完整物理尺寸
                 sf::Vector2u texSize = newCardTexture.getSize();
 
-                // 🌟 动效一：【0.02秒阶梯式下落裁剪 —— 50阶极客精细度重构版】
-                int segmentCount = static_cast<int>(animTime / 0.02f) + 1; 
-                if (segmentCount > 50) segmentCount = 50; 
-                if (animTime > 1.0f) segmentCount = 50;   
+                // 🌟 动效一：连续插值替代固定50段量化，消除帧率拍频闪烁
+                float currentHeightPercent = animTime / 1.0f;  // 0.0 → 1.0 连续增长
+                if (currentHeightPercent > 1.f) currentHeightPercent = 1.f;
+                if (animTime > 1.0f) currentHeightPercent = 1.f;
 
-                // ⏳ 如果处于弹回阶段，并且已经过了 0.3 秒的停顿期，强行保持 50 段全显
+                // ⏳ 弹回阶段过了停顿期后，强制全显
                 if (isReturningToSlot && returnDelayClock.getElapsedTime().asSeconds() >= 0.3f) {
-                    segmentCount = 50;
+                    currentHeightPercent = 1.f;
                 }
-                float currentHeightPercent = segmentCount / 50.f;
                 int currentRectHeight = static_cast<int>(texSize.y * currentHeightPercent);
 
                 // 应用 50 阶微级阶梯裁剪矩形
@@ -1271,44 +1514,214 @@ void GameEngine::renderGameplay() {
                     isAnimatingCard = false;
                 }
 
-                // 🌟【文字时序控制：高精快调提速版】
-                if (!playerDeck.hand.empty()) {
-                    const auto& currentCard = playerDeck.hand.back();
+                // 🌟【文字时序控制】显示活跃卡文字（吸附/湮灭/默认）
+                if (!playerDeck.hand.empty() && activeIdx >= 0) {
+                    const auto& currentCard = playerDeck.hand[activeIdx];
                     uiText.setFont(cardFont);
 
                     float textFadeFactor = animTime / 0.3f; 
                     if (textFadeFactor > 1.f) textFadeFactor = 1.f;
                     uint8_t textAlpha = static_cast<uint8_t>(255 * textFadeFactor);
 
-                    // 1. 名字在第 1 截露头时就渲染（应用你微调后的最新名字精准坐标）
-                    if (segmentCount >= 1) {
-                        uiText.setCharacterSize(14); 
-                        uiText.setFillColor(sf::Color(255, 255, 255, textAlpha)); 
+                    // 1. 名字：剩余高度 >2% 时渲染（连续判定，无帧率依赖）
+                    if (currentHeightPercent > 0.02f) {
+                        uiText.setCharacterSize(14);
+                        uiText.setFillColor(sf::Color(255, 255, 255, textAlpha));
                         uiText.setString(currentCard.name);
-                        uiText.setPosition({cardPos.x - 26.f, cardPos.y - 82.f}); 
+                        uiText.setPosition({cardPos.x - 26.f, cardPos.y - 82.f});
                         window.draw(uiText);
                     }
 
-                    // 2. 描述文字（处于 cardPos.y - 45.f 中上段，应用你满意的描述精准坐标）
-                    if (segmentCount >= 20) { 
+                    // 2. 描述文字：剩余高度 >40% 时渲染
+                    if (currentHeightPercent > 0.40f) {
                         uiText.setCharacterSize(11);
-                        uiText.setFillColor(sf::Color(230, 230, 230, textAlpha)); 
+                        uiText.setFillColor(sf::Color(230, 230, 230, textAlpha));
                         uiText.setString(currentCard.description);
-                        uiText.setPosition({cardPos.x - 44.f, cardPos.y - 45.f}); 
+                        uiText.setPosition({cardPos.x - 44.f, cardPos.y - 45.f});
                         window.draw(uiText);
                     }
 
                     uiText.setFont(font); // 恢复主系统字体
                 }
                 }
-            } else {
-                lastHandEmpty = true;
+            } // 顶卡状态机作用域结束
+        }
+    }
+
+    // ============================================================================
+    // 🌟 卡牌效果展示动画（湮灭完成后，画面中央展示）
+    //    流程: PAUSE(0.5s) → APPEAR(1.2s) → DISPLAY(2s) → FADE_OUT(1s) → 触发效果
+    // ============================================================================
+    if (showcaseState != CardShowcaseState::NONE && newCardSprite != nullptr) {
+        float t = showcaseClock.getElapsedTime().asSeconds();
+        sf::Vector2f centerPos(640.f, 360.f);
+        sf::Vector2u texSize = newCardTexture.getSize();
+        const float TARGET_SCALE = 0.38f;
+        const float START_SCALE  = 0.05f;
+        const float NORMAL_SCALE = 0.18f;              // 卡槽正常缩放
+        const float SCALE_RATIO  = TARGET_SCALE / NORMAL_SCALE;  // ≈ 2.111
+        const int   NAME_FONT    = static_cast<int>(14 * SCALE_RATIO);  // ≈ 30
+        const int   DESC_FONT    = static_cast<int>(11 * SCALE_RATIO);  // ≈ 23
+        const float NAME_OFF_X   = 26.f * SCALE_RATIO;  // ≈ 55
+        const float NAME_OFF_Y   = 82.f * SCALE_RATIO;  // ≈ 173
+        const float DESC_OFF_X   = 44.f * SCALE_RATIO;  // ≈ 93
+        const float DESC_OFF_Y   = 45.f * SCALE_RATIO;  // ≈ 95
+
+        switch (showcaseState) {
+
+            case CardShowcaseState::PAUSE:
+                // 湮灭后 0.3s 空白停顿
+                if (t >= 0.3f) {
+                    showcaseState = CardShowcaseState::APPEAR;
+                    showcaseClock.restart();
+                    std::cout << "[Showcase] 停顿结束，开始中央展示出现动画。" << std::endl;
+                }
+                break;
+
+            case CardShowcaseState::APPEAR: {
+                // ── 缩放：指数缓出 0.05 → 0.38（先快后慢）──
+                float scaleFactor = 1.0f - std::exp(-t * 8.0f);
+                float currentScale = START_SCALE + (TARGET_SCALE - START_SCALE) * scaleFactor;
+
+                // ── 50 段阶梯裁剪：0 → 50（镜像出生动画）──
+                float heightPercent = t / 1.0f;  // 连续插值，0.0 → 1.0，无帧率依赖
+                if (heightPercent > 1.f) heightPercent = 1.f;
+                int rectHeight = static_cast<int>(texSize.y * heightPercent);
+
+                // ── 白光辉光：极亮 → 正常（1.2s，镜像出生动画）──
+                float whiteProgress = 1.0f - (t / 1.2f);
+                if (whiteProgress < 0.f) whiteProgress = 0.f;
+
+                newCardSprite->setScale({currentScale, currentScale});
+                newCardSprite->setPosition(centerPos);
+                newCardSprite->setTextureRect(sf::IntRect({0, 0}, {static_cast<int>(texSize.x), rectHeight}));
+
+                // 双通道渲染（与出生动画完全一致）
+                newCardSprite->setColor(sf::Color(255, 255, 255, 255));
+                window.draw(*newCardSprite, sf::BlendAlpha);
+
+                uint8_t whiteEmit = static_cast<uint8_t>(255 * whiteProgress);
+                newCardSprite->setColor(sf::Color(whiteEmit, whiteEmit, whiteEmit, 255));
+                window.draw(*newCardSprite, sf::BlendAdd);
+
+                // 文字淡入
+                float textFade = t / 0.5f;
+                if (textFade > 1.f) textFade = 1.f;
+                uint8_t ta = static_cast<uint8_t>(255 * textFade);
+
+                uiText.setFont(cardFont);
+                if (heightPercent > 0.02f) {
+                    uiText.setCharacterSize(NAME_FONT);
+                    uiText.setFillColor(sf::Color(255, 255, 255, ta));
+                    uiText.setString(showcasedCard.name);
+                    uiText.setPosition({centerPos.x - NAME_OFF_X, centerPos.y - NAME_OFF_Y});
+                    window.draw(uiText);
+                }
+                if (heightPercent > 0.40f) {
+                    uiText.setCharacterSize(DESC_FONT);
+                    uiText.setFillColor(sf::Color(230, 230, 230, ta));
+                    uiText.setString(showcasedCard.description);
+                    uiText.setPosition({centerPos.x - DESC_OFF_X, centerPos.y - DESC_OFF_Y});
+                    window.draw(uiText);
+                }
+                uiText.setFont(font);
+
+                if (t >= 1.2f) {
+                    showcaseState = CardShowcaseState::DISPLAY;
+                    showcaseClock.restart();
+                    std::cout << "[Showcase] 出现完成，进入完整展示阶段。" << std::endl;
+                }
+                break;
+            }
+
+            case CardShowcaseState::DISPLAY: {
+                // ── 完整展示 2 秒 ──
+                newCardSprite->setScale({TARGET_SCALE, TARGET_SCALE});
+                newCardSprite->setPosition(centerPos);
+                newCardSprite->setTextureRect(sf::IntRect({0, 0}, {static_cast<int>(texSize.x), static_cast<int>(texSize.y)}));
+                newCardSprite->setColor(sf::Color(255, 255, 255, 255));
+                window.draw(*newCardSprite, sf::BlendAlpha);
+
+                uiText.setFont(cardFont);
+                uiText.setCharacterSize(NAME_FONT);
+                uiText.setFillColor(sf::Color(255, 255, 255, 255));
+                uiText.setString(showcasedCard.name);
+                uiText.setPosition({centerPos.x - NAME_OFF_X, centerPos.y - NAME_OFF_Y});
+                window.draw(uiText);
+
+                uiText.setCharacterSize(DESC_FONT);
+                uiText.setFillColor(sf::Color(230, 230, 230, 255));
+                uiText.setString(showcasedCard.description);
+                uiText.setPosition({centerPos.x - DESC_OFF_X, centerPos.y - DESC_OFF_Y});
+                window.draw(uiText);
+                uiText.setFont(font);
+
+                if (t >= 1.2f) {
+                    showcaseState = CardShowcaseState::FADE_OUT;
+                    showcaseClock.restart();
+                    std::cout << "[Showcase] 展示结束，开始消退动画。" << std::endl;
+                }
+                break;
+            }
+
+            case CardShowcaseState::FADE_OUT: {
+                // ── 原色→极亮 + 透明度 255→0（0.4s）──
+                float whiteProgress = t / 0.4f;
+                if (whiteProgress > 1.f) whiteProgress = 1.f;
+                float alphaProgress = 1.0f - whiteProgress;
+                uint8_t currentAlpha = static_cast<uint8_t>(255 * alphaProgress);
+
+                newCardSprite->setScale({TARGET_SCALE, TARGET_SCALE});
+                newCardSprite->setPosition(centerPos);
+                newCardSprite->setTextureRect(sf::IntRect({0, 0}, {static_cast<int>(texSize.x), static_cast<int>(texSize.y)}));
+
+                // BlendAlpha 基底（含透明度衰减）
+                newCardSprite->setColor(sf::Color(255, 255, 255, currentAlpha));
+                window.draw(*newCardSprite, sf::BlendAlpha);
+
+                // BlendAdd 白光叠层（含透明度衰减，同步熄灭）
+                uint8_t whiteEmit = static_cast<uint8_t>(255 * whiteProgress * alphaProgress);
+                newCardSprite->setColor(sf::Color(whiteEmit, whiteEmit, whiteEmit, 255));
+                window.draw(*newCardSprite, sf::BlendAdd);
+
+                // 文字同步淡出
+                uiText.setFont(cardFont);
+                uiText.setCharacterSize(NAME_FONT);
+                uiText.setFillColor(sf::Color(255, 255, 255, currentAlpha));
+                uiText.setString(showcasedCard.name);
+                uiText.setPosition({centerPos.x - NAME_OFF_X, centerPos.y - NAME_OFF_Y});
+                window.draw(uiText);
+
+                uiText.setCharacterSize(DESC_FONT);
+                uiText.setFillColor(sf::Color(230, 230, 230, currentAlpha));
+                uiText.setString(showcasedCard.description);
+                uiText.setPosition({centerPos.x - DESC_OFF_X, centerPos.y - DESC_OFF_Y});
+                window.draw(uiText);
+                uiText.setFont(font);
+
+                if (t >= 0.4f) {
+                    // ▶️ 恢复回合计时 + 解锁玩家操作
+                    if (isTurnPaused) {
+                        turnTimePaused += pauseClock.getElapsedTime().asSeconds();
+                        isTurnPaused = false;
+                    }
+                    isBusyAnimating = false;
+
+                    std::cout << "[Showcase] 消退完成，正式触发卡牌效果 —— "
+                              << showcasedCard.name.c_str() << std::endl;
+                    consumeActionPoint(false);
+                    applyCardEffect(showcasedCard);
+                    settleActionPoints();
+                    showcaseState = CardShowcaseState::NONE;
+                }
+                break;
             }
         }
     }
-    
+    // ============================================================================
+
     if (currentState == GameState::GAME_PVP || currentState == GameState::GAME_PVE) {
-        window.draw(detectionZone); 
+        window.draw(detectionZone);
     }
 
     // ============================================================================
@@ -1324,9 +1737,9 @@ void GameEngine::renderGameplay() {
     // 🌟【预落子圆环浮现逻辑】
     if (currentState == GameState::GAME_PVP || currentState == GameState::GAME_PVE) {
         if (!(currentState == GameState::GAME_PVE && isAiThinking)) {
-            // 只有在鼠标没有抓取卡牌时，才允许棋盘抓取鼠标并绘制提示环
-            if (!isCardAttachedToMouse) {
-                chessboard.drawHoverRing(window, currentTurn); 
+            // 只有在鼠标没有抓取卡牌 且 不在动画期间 时，才绘制预落子提示环
+            if (!isCardAttachedToMouse && !isBusyAnimating) {
+                chessboard.drawHoverRing(window, currentTurn);
             }
         }
     }
@@ -1336,7 +1749,7 @@ void GameEngine::renderGameplay() {
     for (auto& text : gameButtonTexts) window.draw(text);
 
     // 3. 渲染计时器
-    int remainingTime = static_cast<int>(std::ceil(45.f - turnClock.getElapsedTime().asSeconds()));
+    int remainingTime = static_cast<int>(std::ceil(45.f - getEffectiveTurnTime()));
     if (remainingTime < 0) remainingTime = 0;
     timerText.setFillColor(remainingTime <= 10 ? sf::Color(220, 40, 40) : sf::Color(40, 120, 40));
     timerText.setString(sf::String(L"剩余时间: " + std::to_wstring(remainingTime) + L" 秒"));
@@ -1518,6 +1931,13 @@ void GameEngine::initAudio() {
         battleMusic.setVolume(40.f);  // 🌟 对局音乐建议音量稍微小一点（比如 40.f），防止盖过落子音效
         std::cout << "[Audio] 对战音乐 BGM-InBattle_01 加载成功！" << std::endl;
     }
+    if (!battleMusic02.openFromFile(getEngineAssetPath("assets/BGM-InBattle_02.ogg"))) {
+        std::cout << "[Audio Error] 无法加载对战音乐 assets/BGM-InBattle_02.ogg" << std::endl;
+    } else {
+        battleMusic02.setLooping(true);
+        battleMusic02.setVolume(0.f);  // 初始静音，crossfade 时渐显
+        std::cout << "[Audio] 对战音乐 BGM-InBattle_02 加载成功！" << std::endl;
+    }
     if (!winMusic.openFromFile(getEngineAssetPath("assets/BGM-Win.ogg"))) {
         std::cout << "[Audio Error] 无法加载胜利音乐 assets/BGM-Win.ogg" << std::endl;
     } else {
@@ -1533,5 +1953,162 @@ void GameEngine::initAudio() {
         failMusic.setLooping(true);
         failMusic.setVolume(50.f);
         std::cout << "[Audio] 失败音乐 BGM-Fail 加载成功！" << std::endl;
+    }
+}
+
+// ============================================================================
+// 🌟【核心实现：行动点复合管理系统】
+// ============================================================================
+
+// 1. 回合初始分发：玩家获得一个既能下棋又能出牌的【万能行动点】
+void GameEngine::initActionPointsForTurn() {
+    currentTurnActionPoints.clear();
+    currentTurnActionPoints.push_back({ true, true }); // 双能均支持
+    std::cout << "[ActionPoint] 新回合开始，自动分发 1 个【下棋+出牌】双能行动点。" << std::endl;
+}
+
+// 2. 行动合法性检查
+bool GameEngine::hasValidActionPoint(bool isPieceDrop) const {
+    for (const auto& ap : currentTurnActionPoints) {
+        if (isPieceDrop && ap.canPieceDrop) return true;
+        if (!isPieceDrop && ap.canPlayCard) return true;
+    }
+    return false;
+}
+
+// 3. 智能行动点扣除算法
+bool GameEngine::consumeActionPoint(bool isPieceDrop) {
+    if (isPieceDrop) {
+        // 优先寻找“只能下棋，不能出牌”的【专能行动点】，从而将珍贵的“双能万能点”留到最后
+        for (auto it = currentTurnActionPoints.begin(); it != currentTurnActionPoints.end(); ++it) {
+            if (it->canPieceDrop && !it->canPlayCard) {
+                currentTurnActionPoints.erase(it);
+                std::cout << "[ActionPoint] 成功消耗 1 个【仅当下棋】的专属行动点。" << std::endl;
+                return true;
+            }
+        }
+        // 如果没有专属点，再被迫消耗“双能行动点”
+        for (auto it = currentTurnActionPoints.begin(); it != currentTurnActionPoints.end(); ++it) {
+            if (it->canPieceDrop && it->canPlayCard) {
+                currentTurnActionPoints.erase(it);
+                std::cout << "[ActionPoint] 成功消耗 1 个【双能】行动点。" << std::endl;
+                return true;
+            }
+        }
+    } 
+    else {
+        // 优先寻找“只能出牌，不能下棋”的【专能行动点】
+        for (auto it = currentTurnActionPoints.begin(); it != currentTurnActionPoints.end(); ++it) {
+            if (!it->canPieceDrop && it->canPlayCard) {
+                currentTurnActionPoints.erase(it);
+                std::cout << "[ActionPoint] 成功消耗 1 个【仅当出牌】的专属行动点。" << std::endl;
+                return true;
+            }
+        }
+        // 否则消耗双能点
+        for (auto it = currentTurnActionPoints.begin(); it != currentTurnActionPoints.end(); ++it) {
+            if (it->canPieceDrop && it->canPlayCard) {
+                currentTurnActionPoints.erase(it);
+                std::cout << "[ActionPoint] 成功消耗 1 个【双能】行动点。" << std::endl;
+                return true;
+            }
+        }
+    }
+    return false;
+}
+
+// 4. 卡牌赠送接口：未来你的各种卡牌效果完成时，直接调用此函数即可赠送任意组合的行动点
+void GameEngine::addActionPoint(bool canPiece, bool canCard) {
+    currentTurnActionPoints.push_back({ canPiece, canCard });
+    std::cout << "[ActionPoint] 卡牌效果加持！赠送行动点成功：[" 
+              << (canPiece ? " 允许下棋 " : "") << (canCard ? " 允许出牌 " : "") << "]" << std::endl;
+}
+
+// 5. 总体结算中心：在每个离散动作（落子、卡牌效果跑完）后统一调用
+void GameEngine::settleActionPoints() {
+    std::cout << "[ActionPoint] 触发总体结算。当前剩余行动点总数: " << currentTurnActionPoints.size() << std::endl;
+
+    // 严格满足要求：只有在行动点蓄水池彻底空了（为零）的时候，才重置倒计时并切换回合
+    if (currentTurnActionPoints.empty()) {
+        std::cout << "[ActionPoint] 行动点数归零。当前回合强行中止结算，移交回合控制权。" << std::endl;
+        
+        // 换人逻辑（对接你原本的局内逻辑）
+        currentTurn = (currentTurn == 1) ? 2 : 1; 
+        
+        // ⏳ 只有在这里，回合正式切换时，倒计时才允许重置
+        turnClock.restart();
+        turnTimePaused = 0.f;  // 新回合，清零暂停累计
+        isTurnPaused   = false;
+
+        // 自动为下一个接管回合的玩家刷新基础行动点
+        initActionPointsForTurn();
+    } 
+    else {
+        std::cout << "[ActionPoint] 结算完成：仍有可用点数，请继续行动。⏳ 回合倒计时安全锁死，不予重置。" << std::endl;
+    }
+}
+
+// 6. 卡牌效果分发器：湮灭完成后由 GameEngine 统一调度
+void GameEngine::applyCardEffect(const Card& card) {
+    std::cout << "[CardEffect] 触发卡牌效果 —— ID:" << card.id
+              << " 名称:" << card.name.c_str()
+              << " 效果类型:" << static_cast<int>(card.effect) << std::endl;
+
+    switch (card.effect) {
+        case CardEffect::FORCE_DROP:
+            // "连击"：给予两次仅落子行动点（只能下棋，不能再次出牌）
+            addActionPoint(true, false);
+            addActionPoint(true, false);
+            std::cout << "[CardEffect] 连击发动！获得 2 次额外落子机会。" << std::endl;
+            break;
+        case CardEffect::CHANGE_WIN_RULE: {
+            // "隐忍"：将敌方（对手）的胜利条件改为 card.value（六子连星）
+            int opponent = (currentTurn == 1) ? 2 : 1;
+            chessboard.setWinCondition(opponent, card.value);
+            std::cout << "[CardEffect] 隐忍发动！敌方（玩家" << opponent
+                      << "）胜利条件改为 " << card.value << " 子连星。" << std::endl;
+            break;
+        }
+        case CardEffect::REMOVE_OPPONENT:
+            // TODO: 后续实现 —— 移除对方棋子
+            std::cout << "[CardEffect] REMOVE_OPPONENT 尚未实现，预留框架。" << std::endl;
+            break;
+        case CardEffect::EXTRA_TURN:
+            // TODO: 后续实现 —— 额外完整回合
+            std::cout << "[CardEffect] EXTRA_TURN 尚未实现，预留框架。" << std::endl;
+            break;
+        default:
+            std::cout << "[CardEffect] 未知或无效果卡牌。" << std::endl;
+            break;
+    }
+}
+
+// 7. 有效回合时间（实际时间 - 卡牌动画期间的暂停时间）
+float GameEngine::getEffectiveTurnTime() const {
+    float elapsed = turnClock.getElapsedTime().asSeconds();
+    float paused  = turnTimePaused;
+    if (isTurnPaused) {
+        paused += pauseClock.getElapsedTime().asSeconds();
+    }
+    return elapsed - paused;
+}
+
+// 8. 战斗音乐：CardReader 触发切换到 battle_02
+void GameEngine::triggerBattleMusic02() {
+    if (battleMusicState == BattleMusicState::NORMAL) {
+        battleMusicState = BattleMusicState::SWITCHING_TO_02;
+        crossfadeClock.restart();
+        battleMusic02.setVolume(0.f);
+        if (static_cast<int>(battleMusic02.getStatus()) != 2) battleMusic02.play();
+        std::cout << "[Audio] CardReader 检测 —— 切换到 BATTLE_02" << std::endl;
+    }
+}
+
+// 9. 战斗音乐：危机状态延长 battle_02 时长（可叠加，无上限）
+void GameEngine::addCrisisTime(float seconds) {
+    if (battleMusicState == BattleMusicState::BATTLE_02) {
+        battle02Remaining += seconds;
+        std::cout << "[Audio] 危机触发 —— battle_02 延长 " << seconds
+                  << "s，剩余 " << battle02Remaining << "s" << std::endl;
     }
 }

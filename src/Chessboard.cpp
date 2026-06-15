@@ -76,6 +76,8 @@ void Chessboard::reset() {
         }
     }
     clearWinLine();
+    winCondition[1] = 5;  // 黑方默认五子连星
+    winCondition[2] = 5;  // 白方默认五子连星
 
     // 清除历史和回放状态
     moveHistory.clear();
@@ -256,7 +258,7 @@ bool Chessboard::checkWin(int row, int col) {
             c -= dx[i];
         }
 
-        if (count >= 5) {
+        if (count >= winCondition[turn]) {
             // 🌟 找到胜利线！记录它的位置
             findWinLine(row, col);
             return true;
@@ -305,7 +307,7 @@ void Chessboard::findWinLine(int row, int col) {
             c -= dx[i];
         }
 
-        if (count >= 5) {
+        if (count >= winCondition[turn]) {
             hasWin = true;
             winStartRow = startR;
             winStartCol = startC;
@@ -512,4 +514,17 @@ void Chessboard::drawHoverRing(sf::RenderWindow& window, int currentTurn) {
         // 将处理好的高级预落子点最终渲染到屏幕上
         window.draw(hoverRing);
     }
+}
+
+void Chessboard::setWinCondition(int player, int cond) {
+    if (player >= 1 && player <= 2) {
+        winCondition[player] = cond;
+    }
+}
+
+int Chessboard::getWinCondition(int player) const {
+    if (player >= 1 && player <= 2) {
+        return winCondition[player];
+    }
+    return 5;
 }
