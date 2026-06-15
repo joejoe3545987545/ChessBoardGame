@@ -484,9 +484,17 @@ void GameEngine::handleMenuClick(sf::Vector2i mousePos) {
     if (mousePos.x > menuButtonX && mousePos.x < menuButtonRightX) {
         if (mousePos.y > menuStartY && mousePos.y < menuStartY + 50.f) {
             chessboard.reset();
-            
-            // 🌟【确切位置】：在这里精准添加！保证主菜单进入新双人对战时隐藏卡牌底图
-
+            playerDeck.resetDeck();
+            handSlotAssign.clear();
+            attachedCardIndex = -1;
+            isCardAttachedToMouse = false;
+            isBusyAnimating = false;
+            newCardJustDrawn = false;
+            showcaseState = CardShowcaseState::NONE;
+            if (newCardSprite) newCardSprite->setPosition({1080.f, 160.f});
+            battleMusic02.stop();
+            battleMusicState = BattleMusicState::NORMAL;
+            battleMusic.setVolume(BATTLE_VOLUME);
             currentTurn = 1;
             isAiThinking = false;
             isGameOver = false;
@@ -527,9 +535,17 @@ void GameEngine::handlePVEConfigClick(sf::Vector2i mousePos) {
         }
         else if (mousePos.y > 350 && mousePos.y < 400) {
             chessboard.reset();
-            
-            // 🌟【确切位置】：在此处精准添加，保证新PVE对局开始时隐藏卡牌底图
-
+            playerDeck.resetDeck();
+            handSlotAssign.clear();
+            attachedCardIndex = -1;
+            isCardAttachedToMouse = false;
+            isBusyAnimating = false;
+            newCardJustDrawn = false;
+            showcaseState = CardShowcaseState::NONE;
+            if (newCardSprite) newCardSprite->setPosition({1080.f, 160.f});
+            battleMusic02.stop();
+            battleMusicState = BattleMusicState::NORMAL;
+            battleMusic.setVolume(BATTLE_VOLUME);
             currentTurn = 1;
             isAiThinking = false;
             isGameOver = false;

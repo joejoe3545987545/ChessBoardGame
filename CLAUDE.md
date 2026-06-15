@@ -80,6 +80,7 @@ cmake --build build          # 编译
 
 ## 当前状态
 
-- **已完成**：棋盘落子、胜利判定、行动点框架、卡牌出牌流程、FORCE_DROP 效果
-- **进行中**：卡牌功能完善
-- **下一步**：CHANGE_WIN_RULE / REMOVE_OPPONENT / EXTRA_TURN 效果 → 多手牌支持 → 牌库扩展 → AI 出牌
+- **已完成**：棋盘落子、每方独立胜利条件、行动点框架、卡牌出牌流程、双卡槽+堆叠+存放、展示动画、动态音乐、计时暂停
+- **卡牌**：连击（FORCE_DROP）、隐忍（CHANGE_WIN_RULE→敌方六子连星）
+- **渲染**：统一 activeIdx 管理、精灵位置保存恢复、连续插值抗闪烁
+- **下一步**：REMOVE_OPPONENT / EXTRA_TURN 效果 → AI 增强 → 牌库扩展
