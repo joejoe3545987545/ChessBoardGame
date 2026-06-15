@@ -157,6 +157,32 @@ GameEngine::GameEngine()
     } else {
         std::cout << "[UI Error] 无法加载卡槽图片素材 CardSlot.png" << std::endl;
     }
+    if (cardSlotSprite != nullptr) {
+        // 设置圆形的半径
+        detectionZone.setRadius(zoneRadius);
+        
+        // 💡 修复 1：SFML 3.0 的 setOrigin 必须传入 sf::Vector2f，加上大括号 {} 即可
+        detectionZone.setOrigin({zoneRadius, zoneRadius});
+
+        // 核心坐标计算：动态获取卡槽边界，精准贴在它的正下方
+        sf::FloatRect readerBounds = cardSlotSprite->getGlobalBounds();
+        
+        // 💡 修复 2：SFML 3.0 的 sf::Rect 成员全面改为 position 和 size
+        // left -> position.x ； width -> size.x
+        float centerX = 640;      // 水平居中
+        // top -> position.y ； height -> size.y
+        float centerY = 100; 
+
+        // 💡 修复 3：SFML 3.0 的 setPosition 同样必须用大括号 {} 括起来
+        detectionZone.setPosition({centerX, centerY});
+
+        // 开发调试用颜色：半透明绿，方便等会儿测试看位置
+        detectionZone.setFillColor(sf::Color(0, 0, 0, 0)); 
+        detectionZone.setOutlineThickness(0.f);
+        detectionZone.setOutlineColor(sf::Color::Green);
+    } else {
+        std::cerr << "[UI Error] 卡槽精灵未初始化，无法设置检测区域。" << std::endl;
+    }
     // ============================================================================
     // 🌟【修正版】：完美适配 SFML 3.0 规范的读卡器夹层素材初始化
     // ============================================================================
@@ -498,34 +524,23 @@ bool GameEngine::handleHUDClick(sf::Vector2i mousePos) {
         if (isCardAttachedToMouse) {
             // A. 如果卡牌已被吸附随鼠移动：
             // 此时卡牌的渲染位置是以中心点驱动的：cardPos = worldPos - cardMouseOffset
-            // 所以当前帧卡牌的中心点就是 (worldPos - cardMouseOffset)
             // 那么卡牌的左上角物理起点 = 中心点 - 半个高宽 (72.f, 100.f)
             sf::Vector2i pixelPos = sf::Mouse::getPosition(window);
             sf::Vector2f worldPos = window.mapPixelToCoords(pixelPos);
             sf::Vector2f currentCardCenter = worldPos - cardMouseOffset;
             
             cardClickRect = sf::FloatRect(
-                sf::Vector2f(currentCardCenter.x - 72.f, currentCardCenter.y - 100.f), 
+                {currentCardCenter.x - 72.f, currentCardCenter.y - 100.f}, 
                 cardSize
             );
         } else {
             // B. 如果卡牌在原位静止：
             // 严格控制在你指定的绝对范围：X: [1008.f, 1152.f], Y: [60.f, 260.f]
             // 左上角起点为 (1008.f, 60.f)，高宽为 (144.f, 200.f)
-            cardClickRect = sf::FloatRect(sf::Vector2f(1008.f, 60.f), cardSize);
+            cardClickRect = sf::FloatRect({1008.f, 60.f}, cardSize);
         }
 
-        // 检测当前鼠标点击是否精准落在计算出的卡牌包围盒内部
-        if (cardClickRect.contains(mouseClickPos)) {
-            
-            // 核心锁死：如果是【从未吸附 ➡️ 进入吸附】，计算鼠标相对于卡牌中心点(1080.f, 160.f)的相对偏移量
-            if (!isCardAttachedToMouse) {
-                sf::Vector2f cardCenter(1080.f, 160.f);
-                cardMouseOffset = mouseClickPos - cardCenter;
-            }
-
-            // 状态翻转：原本吸附的则归位，原本在原位的则吸附
-            // 检测当前鼠标点击是否精准落在计算出的卡牌包围盒内部
+        // 🔍 【只检测一次】当前鼠标点击是否精准落在计算出的卡牌包围盒内部
         if (cardClickRect.contains(mouseClickPos)) {
             
             if (!isCardAttachedToMouse) {
@@ -534,27 +549,40 @@ bool GameEngine::handleHUDClick(sf::Vector2i mousePos) {
                 cardMouseOffset = mouseClickPos - cardCenter;
                 isCardAttachedToMouse = true;
                 isReturningToSlot = false; // 既然又抓起来了，就掐断之前的归位动画
+                
+                std::cout << "[Card UI] 区域吸附成功！当前卡牌绝对物理范围 X:[1008, 1152] Y:[60, 260]" << std::endl;
             } 
             else {
                 // 2. 🌟【核心改动】从【鼠标吸附】 ➡️ 【松开卡牌】
-                isCardAttachedToMouse = false; // 鼠标解除吸附
                 
-                // 开启飞回卡槽的动画状态机
-                isReturningToSlot = true; 
-                
-                // ⏳【时序捕捉】立刻抓住卡牌松开瞬间在屏幕上的绝对物理坐标，作为飞回的起点
-                returnStartPos = newCardSprite->getPosition(); 
-                
-                // ⏱️【启动计时】重新启动时钟，开始为这 0.2 秒的原地死寂顿挫停顿时间计时
-                returnDelayClock.restart(); 
+                // 📐 计算当前点击位置到圆形区域中心 (640, 100) 的距离
+                float dx = mouseClickPos.x - 640.f;
+                float dy = mouseClickPos.y - 100.f;
+                float distance = std::sqrt(dx * dx + dy * dy);
+
+                if (distance <= zoneRadius) {
+                    // 🔮 分支甲：点击在圆内 ➡️ 触发湮灭仪式
+                    isCardAttachedToMouse = false;
+                    
+                    annihilateState = CardAnnihilateState::PAUSE_BEFORE; // 激活阶段1：原地停顿0.2s
+                    annihilateClock.restart();                           // 启动湮灭专用的独立时钟
+                    
+                    std::cout << "[Card UI] 点击在圆内！释放卡牌并触发湮灭仪式。" << std::endl;
+                }
+                else {
+                    // 🔮 分支乙：点击在圆外 ➡️ 走原逻辑：飞回卡槽
+                    isCardAttachedToMouse = false; 
+                    isReturningToSlot = true; 
+                    
+                    // ⏳【时序捕捉】抓住松开瞬间的绝对坐标
+                    returnStartPos = newCardSprite->getPosition(); 
+                    // ⏱️【启动计时】0.2秒原地顿挫
+                    returnDelayClock.restart(); 
+                    
+                    std::cout << "[Card UI] 点击在圆外，放开卡牌，使其飞回卡槽。" << std::endl;
+                }
             }
 
-            std::cout << "[Card UI] 区域吸附/释放状态更新！" << std::endl;
-            return true; // 拦截点击，防止穿透落子
-        }
-            
-            std::cout << "[Card UI] 区域吸附成功！当前卡牌绝对物理范围 X:[1008, 1152] Y:[60, 260]" << std::endl;
-            
             return true; // 拦截点击，防止穿透落子
         }
     }
@@ -998,32 +1026,9 @@ void GameEngine::renderGameplay() {
                 showCard = true;
             } 
             else {
-                // 如果手里没有卡牌，开启全盘扫描作为保底机制
-                int targetPiece = (currentState == GameState::GAME_PVE) ? playerColorPref : currentTurn;
-
-                for (int r = 0; r < 15; ++r) {
-                    for (int c = 0; c < 15; ++c) {
-                        if (chessboard.getPiece(r, c) != targetPiece) continue;
-
-                        int dr[] = {0, 1, 1, 1};
-                        int dc[] = {1, 0, 1, -1};
-
-                        for (int d = 0; d < 4; ++d) {
-                            int r2 = r + dr[d],     c2 = c + dc[d];
-                            int r3 = r + dr[d] * 2, c3 = c + dc[d] * 2;
-
-                            if (r3 >= 0 && r3 < 15 && c3 >= 0 && c3 < 15) {
-                                if (chessboard.getPiece(r2, c2) == targetPiece && 
-                                    chessboard.getPiece(r3, c3) == targetPiece) {
-                                    showCard = true;
-                                    break;
-                                }
-                            }
-                        }
-                        if (showCard) break;
-                    }
-                    if (showCard) break;
-                }
+                // 💡 彻底修复：手牌为空时，直接锁死为 false，不进行棋盘扫描
+                // 这样湮灭后卡槽就会干干净净，绝不会生成空白幽灵牌
+                showCard = false; 
             }
 
             // 🌟 只有满足 showCard 条件时，才把卡牌和文字盖在卡槽上面渲染
@@ -1039,7 +1044,7 @@ void GameEngine::renderGameplay() {
                 float animTime = cardAnimClock.getElapsedTime().asSeconds();
 
                 // ============================================================
-                // 🌟【精调版】：支持“原地停顿 0.3s + 柔和缓出弹回”的精确计算
+                // 🌟【新复合精调版】：支持鼠标吸附、弹回以及全新的湮灭仪式计算
                 // ============================================================
                 sf::Vector2f cardPos;
                 sf::Vector2f targetPos(1080.f, 160.f); // 🎯 卡槽固定中心回归点
@@ -1050,27 +1055,171 @@ void GameEngine::renderGameplay() {
                     sf::Vector2f worldPos = window.mapPixelToCoords(pixelPos);
                     cardPos = worldPos - cardMouseOffset;
                 } 
+                else if (annihilateState != CardAnnihilateState::NONE) {
+                    // 🌟【核心插入：卡牌多阶段湮灭仪式状态机驱动】
+                    float elapsed = annihilateClock.getElapsedTime().asSeconds();
+                    cardPos = newCardSprite->getPosition(); // 默认保持当前帧的物理位置
+
+                    switch (annihilateState) {
+                        case CardAnnihilateState::PAUSE_BEFORE:
+                            // 【阶段 1】：点中后，在放开的原地完美死寂停顿 0.2 秒
+                            if (elapsed >= 0.2f) {
+                                annihilateState = CardAnnihilateState::MOVE_TO_200;
+                                annihilateClock.restart(); // 为下一阶段重新计时
+                                std::cout << "[Annihilate] 阶段 1 结束，落向 (640, 200)" << std::endl;
+                            }
+                            break;
+
+                        case CardAnnihilateState::MOVE_TO_200: {
+                            // 🎯 设定第二阶段的目标过渡坐标
+                            sf::Vector2f targetAnnihilatePos(640.f, 200.f);
+
+                            // 🚀 核心缓动算法：先快后慢的指数级缓出曲线 (与飞回卡槽的因子 0.07f 完美同步)
+                            cardPos.x = cardPos.x + (targetAnnihilatePos.x - cardPos.x) * 0.07f;
+                            cardPos.y = cardPos.y + (targetAnnihilatePos.y - cardPos.y) * 0.07f;
+
+                            // 📐 实时计算当前卡牌与目标点 (640, 200) 的绝对像素距离
+                            float dist = std::sqrt(std::pow(targetAnnihilatePos.x - cardPos.x, 2) + 
+                                                   std::pow(targetAnnihilatePos.y - cardPos.y, 2));
+
+                            // 当绝对距离极其接近（小于 0.5 像素）时，宣告彻底就位
+                            if (dist < 0.5f) {
+                                cardPos = targetAnnihilatePos; // 强行精准落位消除微小误差
+                                
+                                // 瞬间切入下一阶段：原地停顿 0.5 秒
+                                annihilateState = CardAnnihilateState::PAUSE_AFTER;
+                                annihilateClock.restart(); // ⏱️ 为接下来的 0.5 秒停顿期重新开始计时
+                                
+                                std::cout << "[Annihilate] 丝滑缓动成功！已抵达 (640, 200)，开始静止 0.5 秒" << std::endl;
+                            }
+                            break;
+                        }
+
+                        case CardAnnihilateState::PAUSE_AFTER:
+                            // 【阶段 3】：在 (640, 200) 稳稳卡住停顿 0.5 秒
+                            cardPos = {640.f, 200.f};
+                            if (elapsed >= 0.5f) {
+                                annihilateState = CardAnnihilateState::MOVE_TO_ZERO;
+                                annihilateClock.restart();
+                                std::cout << "[Annihilate] 阶段 3 结束，启动虚无上升序列" << std::endl;
+                            }
+                            break;
+
+                        case CardAnnihilateState::MOVE_TO_ZERO: {
+                            // 【阶段 4】：缓慢向上移动到虚无边界 (640, 70)
+                            float moveSpeed = 45.f; // 保持你满意的慢速
+                            float nextY = cardPos.y - (moveSpeed * 0.016f); // 采用 60 帧近似步长
+                            cardPos = {640.f, nextY};
+
+                            // 边界判定：一旦触及或超越顶端 Y = 70.f
+                            if (nextY <= 70.f) {
+                                cardPos = {640.f, 70.f}; // 🌟 精准锁死在 70.f 的位置，不再往上飘
+                                
+                                // 🌟 转向全新阶段 5：在这里开始最终的定格
+                                annihilateState = CardAnnihilateState::PAUSE_FINAL; 
+                                annihilateClock.restart(); // ⏱️ 重新开始为 0.5 秒定格时间计时
+                                std::cout << "[Annihilate] 阶段 4 结束，到达 Y=70，开始最终定格 0.5 秒..." << std::endl;
+                            }
+                            break;
+                        }
+
+                        case CardAnnihilateState::PAUSE_FINAL: {
+                            cardPos = {640.f, 70.f}; 
+                            
+                            // ============================================================================
+                            // 🔮【另外单写：专属高级湮灭特效渲染通道】
+                            // ============================================================================
+                            float disappearTime = elapsed; // 使用湮灭阶段独立时间
+                            sf::Vector2u texSize = newCardTexture.getSize();
+
+                            // ⏱️ 1. 湮灭裁剪：1秒内50帧，由50逐帧递减归0（从下往上一截截解体消失）
+                            int annihilateSegments = 50 - static_cast<int>(disappearTime / 0.02f);
+                            if (annihilateSegments < 0) annihilateSegments = 0;
+                            if (disappearTime > 1.0f) annihilateSegments = 0;
+
+                            float heightPercent = annihilateSegments / 50.f;
+                            int currentRectHeight = static_cast<int>(texSize.y * heightPercent);
+                            
+                            // 应用位置、缩放及湮灭专用的裁剪矩形
+                            newCardSprite->setScale({0.18f, 0.18f});
+                            newCardSprite->setPosition(cardPos); 
+                            newCardSprite->setTextureRect(sf::IntRect({0, 0}, {static_cast<int>(texSize.x), currentRectHeight}));
+
+                            // ⏱️ 2. 0.6秒内极速变白变亮进度
+                            float whiteProgress = disappearTime / 0.6f;
+                            if (whiteProgress > 1.f) whiteProgress = 1.f;
+
+                            // ⏱️ 🌟【新增】控制 1.0 秒内整体透明度从 255 降低到 0 的淡出因子
+                            float fadeProgress = 1.0f - (disappearTime / 1.0f);
+                            if (fadeProgress < 0.f) fadeProgress = 0.f;
+                            uint8_t currentAlpha = static_cast<uint8_t>(255 * fadeProgress);
+
+                            // 1️⃣ 第一步：渲染底色，让卡牌本体的透明度随时间降低到 0
+                            newCardSprite->setColor(sf::Color(255, 255, 255, currentAlpha)); // 👈 核心修改：Alpha 由 255 改为动态的 currentAlpha
+                            window.draw(*newCardSprite, sf::BlendAlpha); 
+
+                            // 2️⃣ 第二步：渲染纯白强光，强光的能量也随着卡牌淡出同步减弱熄灭
+                            uint8_t whiteEmit = static_cast<uint8_t>(255 * whiteProgress * fadeProgress); // 👈 叠加淡出因子
+                            newCardSprite->setColor(sf::Color(whiteEmit, whiteEmit, whiteEmit, 255)); 
+                            window.draw(*newCardSprite, sf::BlendAdd);   
+
+                            // ⏱️ 3. 专属文字根据裁剪进度和淡出进度同步隐藏与淡出
+                            if (!playerDeck.hand.empty()) {
+                                const auto& currentCard = playerDeck.hand.back();
+                                uiText.setFont(cardFont);
+
+                                // 名字：让名字也享有透明度淡出的效果
+                                if (annihilateSegments >= 1) {
+                                    uiText.setCharacterSize(14); 
+                                    uiText.setFillColor(sf::Color(255, 255, 255, currentAlpha)); // 👈 同步应用 currentAlpha
+                                    uiText.setString(currentCard.name);
+                                    uiText.setPosition({cardPos.x - 26.f, cardPos.y - 82.f}); 
+                                    window.draw(uiText);
+                                }
+
+                                // 描述文字：跌破20截时隐藏，且隐藏前正常享受淡出
+                                if (annihilateSegments >= 20) { 
+                                    uiText.setCharacterSize(11);
+                                    uiText.setFillColor(sf::Color(230, 230, 230, currentAlpha)); // 👈 同步应用 currentAlpha
+                                    uiText.setString(currentCard.description);
+                                    uiText.setPosition({cardPos.x - 44.f, cardPos.y - 45.f}); 
+                                    window.draw(uiText);
+                                }
+                                uiText.setFont(font); // 还原主系统字体
+                            }
+                            // ============================================================================
+                            
+                            // ⏱️ 动画总长为 1.0 秒，在最后一截彻底归0消失的瞬间，宣告完全湮灭
+                            if (elapsed >= 1.0f) {
+                                if (!playerDeck.hand.empty()) {
+                                    playerDeck.hand.pop_back(); // 正式移出手牌
+                                    std::cout << "[Annihilate] 燃尽并完全淡出，卡牌正式完全湮灭！" << std::endl;
+                                }
+                                annihilateState = CardAnnihilateState::NONE; // 关闭状态机
+                            }
+                            break;
+                        }
+
+                        default:
+                            break;
+                    }
+                }
                 else if (isReturningToSlot) {
                     // 2. 激活弹回动画状态机中
                     float returnElapsed = returnDelayClock.getElapsedTime().asSeconds();
                     
                     if (returnElapsed < 0.15f) {
-                        // ⏳ 阶段 A：【同步修正】前 0.15 秒，卡牌死死卡在原地不挪窝
                         cardPos = returnStartPos;
                     } 
                     else {
-                        // 🚀 阶段 B：先快后慢的指数级缓出曲线 (Exponential Decay)
                         sf::Vector2f currentPos = newCardSprite->getPosition();
-                        
-                        // 💡 将速度因子由 0.12f 降低至 0.07f，使得过程更加绵密、丝滑
                         cardPos.x = currentPos.x + (targetPos.x - currentPos.x) * 0.07f;
                         cardPos.y = currentPos.y + (targetPos.y - currentPos.y) * 0.07f;
 
-                        // 当绝对距离极其接近（比如小于 0.5 像素）时，宣告彻底到家，关闭回归状态机
                         float dist = std::sqrt(std::pow(targetPos.x - cardPos.x, 2) + std::pow(targetPos.y - cardPos.y, 2));
                         if (dist < 0.5f) {
                             cardPos = targetPos;
-                            isReturningToSlot = false; // 完美优雅谢幕
+                            isReturningToSlot = false; 
                         }
                     }
                 } 
@@ -1078,7 +1227,8 @@ void GameEngine::renderGameplay() {
                     // 3. 常态静止稳定地常驻在卡槽中央
                     cardPos = targetPos;
                 }
-
+                
+                if (annihilateState != CardAnnihilateState::PAUSE_FINAL) {
                 // 更新卡牌位置并锁死 0.18 的微缩缩放比例
                 newCardSprite->setScale({0.18f, 0.18f});
                 newCardSprite->setPosition(cardPos); 
@@ -1150,10 +1300,15 @@ void GameEngine::renderGameplay() {
 
                     uiText.setFont(font); // 恢复主系统字体
                 }
+                }
             } else {
                 lastHandEmpty = true;
             }
         }
+    }
+    
+    if (currentState == GameState::GAME_PVP || currentState == GameState::GAME_PVE) {
+        window.draw(detectionZone); 
     }
 
     // ============================================================================

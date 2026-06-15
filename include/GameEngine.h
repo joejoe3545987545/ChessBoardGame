@@ -126,6 +126,10 @@ private:
     sf::Texture cardSlotTexture;
     sf::Sprite* cardSlotSprite = nullptr;
     
+    // 🌟【新增：CardReader正下方的圆形检测区域】
+    sf::CircleShape detectionZone;
+    float zoneRadius = 120.0f; // 暂定半径为50像素，后续可以根据实际大小微调
+
     // 🌟【新增：卡牌高精动效时序控制器】
     sf::Clock cardAnimClock;      // 记录卡牌动画已经播了多久
     bool isAnimatingCard = false; // 当前卡牌是否正处于出场动画中
@@ -134,6 +138,19 @@ private:
     bool isReturningToSlot = false;   // 卡牌当前是否正处于“弹回卡槽”的动画中
     sf::Clock returnDelayClock;       // 计时器：用来处理点击后的 0.2 秒静止停顿
     sf::Vector2f returnStartPos;      // 记录玩家松开点击时，卡牌在屏幕上的那一瞬间的物理坐标
+    
+    enum class CardAnnihilateState {
+        NONE,            // 常态（没有触发湮灭）
+        PAUSE_BEFORE,    // 阶段 1：点中后，在原地停顿 0.2 秒
+        MOVE_TO_200,     // 阶段 2：位移到 (640, 200)
+        PAUSE_AFTER,     // 阶段 3：在 (640, 200) 停顿 0.5 秒
+        MOVE_TO_ZERO,     // 阶段 4：缓慢向上移动到 (640, 0)
+        PAUSE_FINAL      // 新增阶段 5：在 70 的位置定格停顿 0.5 秒
+    };
+
+    CardAnnihilateState annihilateState = CardAnnihilateState::NONE; // 当前湮灭状态
+    sf::Clock annihilateClock;                                      // 湮灭专用独立时钟
+
     // 🌟【新增：读卡器夹层素材】
     std::unique_ptr<sf::Texture> cardReaderTopTexture;
     std::unique_ptr<sf::Sprite> cardReaderTopSprite;
