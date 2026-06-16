@@ -55,6 +55,14 @@ public:
     bool isReplaying() const;
     void drawHoverRing(sf::RenderWindow& window, int currentTurn);
 
+    // 棋子动画（销毁/转化，可复用）
+    void startDestroyAnim(int row, int col);
+    void startConvertAnim(int row, int col, int fromColor, int toColor);
+    bool isPieceAnimating() const;
+    bool updatePieceAnim();   // true=本帧刚结束
+    void finishPieceAnim();   // 清除动画状态（grid 更新后调用）
+    int  animRow = -1, animCol = -1;
+
 private:
     int grid[15][15];
 
@@ -93,6 +101,13 @@ private:
     // 内部直接放置棋子到网格（不记录 moveHistory，不触发外部回调）
     void placeDirect(int row, int col, int player);
     sf::Vector2i hoverGridPos = sf::Vector2i(-1, -1);
+
+    // 棋子动画状态
+    int  pieceAnimType = 0;       // 0=无, 1=销毁, 2=转化
+    int  pieceAnimFrom = 0;       // 原颜色
+    int  pieceAnimTo = 0;         // 目标颜色
+    bool pieceAnimJustDone = false;
+    sf::Clock pieceAnimClock;
 };
 
 #endif // CHESSBOARD_H

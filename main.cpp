@@ -1,9 +1,12 @@
 #include <SFML/Graphics.hpp>
 #include <filesystem>
 #include <iostream>
-#include "GameEngine.h" // 🌟 请确保这里的头文件和你原本的引擎头文件一致
+#include <cstdlib>
+#include <ctime>
+#include "GameEngine.h"
 
 int main(int argc, char* argv[]) {
+    std::srand(static_cast<unsigned>(std::time(nullptr)));
     // 避免在 Windows 上因为硬编码 macOS 路径导致崩溃。
     try {
         if (!std::filesystem::exists("assets")) {

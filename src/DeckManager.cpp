@@ -1,45 +1,59 @@
 #include <iostream>
+#include <cstdlib>
 #include "DeckManager.h"
 
 DeckManager::DeckManager() {
-    initDeck(); // 初始化牌库
+    initDeck();
 }
 
 void DeckManager::initDeck() {
-    // 这里先建立一个框架，后续可以从 JSON 读取
     deck.push_back({1, L"连击", L"给予两次落子数", CardEffect::FORCE_DROP, 0});
     deck.push_back({3, L"隐忍", L"迫使敌方承受：\n六子连星为胜途", CardEffect::CHANGE_WIN_RULE, 6});
+    deck.push_back({4, L"笼络", L"销毁己方一个棋子\n转化敌方一个棋子", CardEffect::CONVERT_PIECE, 0});
+    deck.push_back({5, L"破釜沉舟", L"将手牌放回牌库\n根据放回的数量\n销毁敌方棋子", CardEffect::SACRIFICE_HAND, 0});
 }
 
 void DeckManager::playCard(int index, Chessboard& board) {
     Card c = hand[index];
     switch(c.effect) {
         case CardEffect::FORCE_DROP:
-            // TODO: 调用落子逻辑
+            // TODO
             break;
         case CardEffect::CHANGE_WIN_RULE:
-            // TODO: 修改全局胜利条件变量
+            // TODO
             break;
-            // ... 更多效果 ...
     }
-    hand.erase(hand.begin() + index); // 出牌后移除
+    hand.erase(hand.begin() + index);
 }
 
 void DeckManager::drawCard() {
     if (!deck.empty()) {
-        hand.push_back(deck.front()); // 将牌库顶部的牌移到手牌
-        deck.pop_front();
-        std::cout << "[CardSystem] 成功抽卡！当前手牌数: " << hand.size() << std::endl;
+        int idx = rand() % static_cast<int>(deck.size());
+        hand.push_back(deck[idx]);
+        deck.erase(deck.begin() + idx);
+        std::cout << "[CardSystem] 随机抽卡！当前手牌数: " << hand.size()
+                  << " 剩余牌库: " << deck.size() << std::endl;
     } else {
         std::cout << "[CardSystem] 牌库空了！" << std::endl;
     }
 }
 
+void DeckManager::returnHandToDeck() {
+    for (auto& c : hand) deck.push_back(c);
+    hand.clear();
+    std::cout << "[CardSystem] 手牌已全部回到牌库，牌库大小: " << deck.size() << std::endl;
+}
 
+void DeckManager::discardCard(const Card& card) {
+    discardPile.push_back(card);
+    std::cout << "[CardSystem] 卡牌进入弃牌堆: " << card.name.c_str()
+              << " 弃牌堆大小: " << discardPile.size() << std::endl;
+}
 
 void DeckManager::resetDeck() {
-    hand.clear(); // 清空手牌
-    deck.clear(); // 清空残余牌库
-    initDeck();   // 🌟 重新调用你写好的初始化，倒满 2 张初始卡牌
-    std::cout << "[CardSystem] 牌库与手牌已彻底重置洗牌！" << std::endl;
+    hand.clear();
+    deck.clear();
+    discardPile.clear();
+    initDeck();
+    std::cout << "[CardSystem] 牌库、手牌、弃牌堆已彻底重置！" << std::endl;
 }

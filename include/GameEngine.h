@@ -66,7 +66,9 @@ private:
     AIPlayer* aiPlayer;
 
     // ===== 窗口和显示设置 =====
-    bool isFullscreen = false;
+    bool isFullscreen = true;   // 默认无边框全屏
+    sf::View gameView;          // 1280×720 逻辑视图
+    void applyViewport();       // 计算比例保持的 viewport
     static const unsigned int WINDOW_WIDTH = 1280;
     static const unsigned int WINDOW_HEIGHT = 720;
 
@@ -76,6 +78,12 @@ private:
     std::wstring winReason;
     bool isGameOver;
     bool isBusyAnimating = false;       // 🌟 卡牌动画期间锁定玩家操作和 AI
+    bool isSelectingPiece = false;      // 🌟 笼络选子模式
+    int  selectPieceStep  = 0;          // 1=选己方, 2=销毁动画中/等待, 3=转化动画中
+    int  selectPiecePlayer = 0;         // 谁在选子
+    // 批量销毁队列（破釜沉舟等）
+    std::vector<std::pair<int,int>> pendingDestroys;
+    bool isBulkDestroying = false;      // 批量销毁进行中
     bool isCardAttachedToMouse = false; // 🌟 标记卡牌是否吸附在鼠标上
     sf::Vector2f cardMouseOffset = {0.f, 0.f};
     DeckManager playerDeck;
@@ -95,7 +103,7 @@ private:
     bool consumeActionPoint(bool isPieceDrop);       // 消耗行动点（含智能防卡手消耗算法）
     void addActionPoint(bool canPiece, bool canCard); // 供卡牌效果调用：额外赠送特定行动点
     void settleActionPoints();                       // 🌟 总体行动点结算中心（决定回合是否结束）
-    void applyCardEffect(const Card& card);         // 🌟 卡牌效果分发器（湮灭完成后触发）
+    bool applyCardEffect(const Card& card);         // 🌟 卡牌效果分发器（true=即时完成 false=延迟）
 
     // ===== 人机对战设置 =====
     int playerColorPref;      // 1: 玩家执黑, 2: 玩家执白
@@ -208,11 +216,17 @@ private:
     sf::Clock showcaseClock;            // 展示阶段独立时钟
 
     // 🌟【新增：读卡器夹层素材】
+    // CardReader（上方）
     std::unique_ptr<sf::Texture> cardReaderTopTexture;
     std::unique_ptr<sf::Sprite> cardReaderTopSprite;
-
     std::unique_ptr<sf::Texture> cardReaderBottomTexture;
     std::unique_ptr<sf::Sprite> cardReaderBottomSprite;
+
+    // CardPortal（下方，与 CardReader 对称）
+    std::unique_ptr<sf::Texture> cardPortalTopTexture;
+    std::unique_ptr<sf::Sprite> cardPortalTopSprite;
+    std::unique_ptr<sf::Texture> cardPortalBottomTexture;
+    std::unique_ptr<sf::Sprite> cardPortalBottomSprite;
 };
 
 #endif // GAMEENGINE_H

@@ -9,12 +9,15 @@
 class DeckManager {
 public:
     DeckManager();
-    void drawCard(); // 从牌库抽一张
+    void drawCard(); // 从牌库随机抽一张
+    void discardCard(const Card& card); // 弃牌堆
+    void returnHandToDeck(); // 手牌全部回牌库
     void playCard(int index, Chessboard& board); // 出牌并触发效果
     void resetDeck();
 
-    std::vector<Card> hand; // 当前手牌
-    std::deque<Card> deck;  // 牌库
+    std::vector<Card> hand;        // 当前手牌
+    std::deque<Card> deck;         // 牌库
+    std::vector<Card> discardPile; // 弃牌堆（无法再抽到）
 
 private:
     void initDeck(); // 初始化初始卡牌池

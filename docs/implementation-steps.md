@@ -47,7 +47,9 @@
 
 ### 阶段 1：完善卡牌效果
 - [x] FORCE_DROP（连击）✅
-- [x] CHANGE_WIN_RULE（隐忍，敌方胜利条件→6）✅
+- [x] CHANGE_WIN_RULE（隐忍，敌方→六子连星）✅
+- [x] CONVERT_PIECE（笼络，销毁己方+转化敌方）✅
+- [x] SACRIFICE_HAND（破釜沉舟，回手牌+批量销毁）✅
 - [ ] REMOVE_OPPONENT（移除对方棋子）
 - [ ] EXTRA_TURN（额外完整回合）
 

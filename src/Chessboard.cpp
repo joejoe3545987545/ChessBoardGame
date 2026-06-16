@@ -76,8 +76,10 @@ void Chessboard::reset() {
         }
     }
     clearWinLine();
-    winCondition[1] = 5;  // 黑方默认五子连星
-    winCondition[2] = 5;  // 白方默认五子连星
+    winCondition[1] = 5;
+    winCondition[2] = 5;
+    pieceAnimType = 0;     // 清除棋子动画
+    animRow = animCol = -1;
 
     // 清除历史和回放状态
     moveHistory.clear();
@@ -361,25 +363,55 @@ void Chessboard::draw(sf::RenderWindow& window) {
     // 🌟 渲染背景图
     window.draw(boardSprite);
 
-    // 2. 棋子渲染（保持你原本的精灵图缩放及 grid 判定逻辑）
+    // 2. 棋子渲染（含动画效果）
     for (int i = 0; i < 15; ++i) {
         for (int j = 0; j < 15; ++j) {
-            if (grid[i][j] == 1 || grid[i][j] == 2) {
-                sf::Sprite& targetSprite = (grid[i][j] == 1) ? blackSprite : whiteSprite;
-                sf::Texture& targetTexture = (grid[i][j] == 1) ? blackTexture : whiteTexture;
+            bool isAnimPiece = (i == animRow && j == animCol && pieceAnimType != 0);
+            int displayColor = grid[i][j];
+            if (displayColor == 0 && !isAnimPiece) continue;
 
-                sf::Vector2u textureSize = targetTexture.getSize();
-                if (textureSize.x > 0 && textureSize.y > 0) {
-                    targetSprite.setScale({38.0f / static_cast<float>(textureSize.x), 38.0f / static_cast<float>(textureSize.y)});
+            // 获取动画进度
+            float t = 0.f;
+            if (isAnimPiece) {
+                float raw = pieceAnimClock.getElapsedTime().asSeconds() / 1.0f;
+                if (raw > 1.f) raw = 1.f;
+                t = raw * raw * (3.f - 2.f * raw); // smoothstep 缓进缓出
+            }
+
+            auto drawPiece = [&](int color, float clipHeight, uint8_t alpha = 255) {
+                if (color == 0 || alpha == 0) return;
+                sf::Sprite& sp = (color == 1) ? blackSprite : whiteSprite;
+                sf::Texture& tx = (color == 1) ? blackTexture : whiteTexture;
+                sf::Vector2u ts = tx.getSize();
+                if (ts.x == 0 || ts.y == 0) return;
+                sp.setScale({38.f / (float)ts.x, 38.f / (float)ts.y});
+                float px, py;
+                getGridPosition(i, j, px, py);
+                sp.setPosition({px, py});
+                int ch = (int)(ts.y * clipHeight);
+                sp.setTextureRect(sf::IntRect({0, 0}, {(int)ts.x, ch}));
+                sp.setColor(sf::Color(255, 255, 255, alpha));
+                window.draw(sp);
+                sp.setTextureRect(sf::IntRect({0, 0}, {(int)ts.x, (int)ts.y}));
+                sp.setColor(sf::Color(255, 255, 255, 255)); // 恢复
+            };
+
+            if (isAnimPiece) {
+                if (pieceAnimType == 1) {
+                    // 销毁：clip 收缩 1→0 + alpha 255→0
+                    float h = 1.f - t;
+                    uint8_t a = (uint8_t)(255 * (1.f - t));
+                    if (h > 0.f) drawPiece(pieceAnimFrom, h, a);
+                } else if (pieceAnimType == 2) {
+                    // 转化：toColor 全图 alpha 0→255，fromColor clip 收缩 1→0 alpha 255→0
+                    uint8_t aTo = (uint8_t)(255 * t);
+                    uint8_t aFrom = (uint8_t)(255 * (1.f - t));
+                    drawPiece(pieceAnimTo, 1.f, aTo);
+                    float h = 1.f - t;
+                    if (h > 0.f) drawPiece(pieceAnimFrom, h, aFrom);
                 }
-
-                float posX, posY;
-                getGridPosition(i, j, posX, posY);
-
-                if (posX >= 0 && posY >= 0) {
-                    targetSprite.setPosition({posX, posY});
-                    window.draw(targetSprite);
-                }
+            } else {
+                drawPiece(displayColor, 1.f);
             }
         }
     }
@@ -527,4 +559,42 @@ int Chessboard::getWinCondition(int player) const {
         return winCondition[player];
     }
     return 5;
+}
+
+// ── 棋子动画 ──
+void Chessboard::startDestroyAnim(int row, int col) {
+    animRow = row; animCol = col;
+    pieceAnimType = 1;
+    pieceAnimFrom = grid[row][col];
+    pieceAnimJustDone = false;
+    pieceAnimClock.restart();
+}
+
+void Chessboard::startConvertAnim(int row, int col, int fromColor, int toColor) {
+    animRow = row; animCol = col;
+    pieceAnimType = 2;
+    pieceAnimFrom = fromColor;
+    pieceAnimTo   = toColor;
+    pieceAnimJustDone = false;
+    pieceAnimClock.restart();
+}
+
+bool Chessboard::isPieceAnimating() const {
+    return pieceAnimType != 0;
+}
+
+bool Chessboard::updatePieceAnim() {
+    if (pieceAnimType == 0) return false;
+    if (pieceAnimJustDone)  return false; // 防重入
+    if (pieceAnimClock.getElapsedTime().asSeconds() >= 1.0f) {
+        pieceAnimJustDone = true;
+        return true;
+    }
+    return false;
+}
+
+void Chessboard::finishPieceAnim() {
+    pieceAnimType = 0;
+    animRow = animCol = -1;
+    pieceAnimJustDone = false;
 }
