@@ -345,22 +345,18 @@ void Chessboard::clearWinLine() {
 // 绘制棋盘
 // ============================================================================
 void Chessboard::draw(sf::RenderWindow& window) {
-    // 1. 🌟【底图替换】不再使用橘黄色色块，改用你准备好的 boardSprite
-    // 计算底图的左上角绝对坐标
-    float boardLeftX = START_X - STEP * 0.5f-27.5f;
-    float boardTopY = START_Y - STEP * 0.5f-28.0f;
-    boardSprite.setPosition({boardLeftX, boardTopY});
-
-    // 🌟【自适应缩放】将底图完美缩放到标准 BOARD_WIDTH 和 BOARD_HEIGHT
-    // 这样无论你的 board.png 尺寸是多少，都会严丝合缝地填满你的棋盘区域
+    // 1. 🌟 棋盘底图（中心原点，方便缩放校准）
     sf::Vector2u boardTextureSize = boardTexture.getSize();
     if (boardTextureSize.x > 0 && boardTextureSize.y > 0) {
+        boardSprite.setOrigin({boardTextureSize.x / 2.f, boardTextureSize.y / 2.f});
         boardSprite.setScale({
-            1.1f*(BOARD_WIDTH / static_cast<float>(boardTextureSize.x)), 
-            1.1f*(BOARD_HEIGHT / static_cast<float>(boardTextureSize.y))
+            1.315f * BOARD_WIDTH  / static_cast<float>(boardTextureSize.x),
+            1.3f * BOARD_HEIGHT / static_cast<float>(boardTextureSize.y)
         });
     }
-    // 🌟 渲染背景图
+    float boardCenterX = START_X + GRID_SPAN * 0.5f - 1.f;
+    float boardCenterY = START_Y + GRID_SPAN * 0.5f + 5.f;
+    boardSprite.setPosition({boardCenterX, boardCenterY});
     window.draw(boardSprite);
 
     // 2. 棋子渲染（含动画效果）
@@ -384,7 +380,7 @@ void Chessboard::draw(sf::RenderWindow& window) {
                 sf::Texture& tx = (color == 1) ? blackTexture : whiteTexture;
                 sf::Vector2u ts = tx.getSize();
                 if (ts.x == 0 || ts.y == 0) return;
-                sp.setScale({38.f / (float)ts.x, 38.f / (float)ts.y});
+                sp.setScale({34.2f / (float)ts.x, 34.2f / (float)ts.y});
                 float px, py;
                 getGridPosition(i, j, px, py);
                 sp.setPosition({px, py});

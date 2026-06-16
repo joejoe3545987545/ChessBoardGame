@@ -2197,18 +2197,27 @@ bool GameEngine::applyCardEffect(const Card& card) {
             std::cout << "[CardEffect] 笼络发动！请先选择己方棋子销毁。" << std::endl;
             return false;
         case CardEffect::SACRIFICE_HAND: {
-            int handCount = (int)playerDeck.hand.size();
-            int destroyCount = (handCount >= 3) ? 5 : (handCount == 2 ? 3 : (handCount == 1 ? 2 : 0));
-            playerDeck.returnHandToDeck();
+            int otherCards = std::max(0, (int)playerDeck.hand.size() - 1); // 不计自身
+            int destroyCount = (otherCards >= 3) ? 5 : (otherCards == 2 ? 3 : (otherCards == 1 ? 2 : 1));
+            // 只回其他手牌到牌库，自身保留（后续进弃牌堆）
+            for (size_t i = 0; i < playerDeck.hand.size(); ++i) {
+                if (static_cast<int>(i) != attachedCardIndex)
+                    playerDeck.deck.push_back(playerDeck.hand[i]);
+            }
+            // 仅保留破釜沉舟自身
+            Card selfCard = playerDeck.hand[attachedCardIndex];
+            int  selfSlot = handSlotAssign[attachedCardIndex];
+            playerDeck.hand.clear();
             handSlotAssign.clear();
+            playerDeck.hand.push_back(selfCard);
+            handSlotAssign.push_back(selfSlot);
+            attachedCardIndex = 0;
             int enemy = (currentTurn == 1) ? 2 : 1;
-            // 收集敌方棋子
             std::vector<std::pair<int,int>> enemyPieces;
             for (int r = 0; r < 15; ++r)
                 for (int c = 0; c < 15; ++c)
                     if (chessboard.getPiece(r, c) == enemy)
                         enemyPieces.push_back({r, c});
-            // 随机打乱
             for (size_t k = 0; k < enemyPieces.size(); ++k) {
                 int sw = rand() % enemyPieces.size();
                 std::swap(enemyPieces[k], enemyPieces[sw]);
@@ -2222,10 +2231,10 @@ bool GameEngine::applyCardEffect(const Card& card) {
                 auto& p = pendingDestroys.back();
                 chessboard.startDestroyAnim(p.first, p.second);
                 isBusyAnimating = true;
-                std::cout << "[CardEffect] 破釜沉舟！回手" << handCount
+                std::cout << "[CardEffect] 破釜沉舟！回手" << otherCards
                           << "张，销毁" << actual << "颗敌方棋子。" << std::endl;
             }
-            return false; // 延迟：动画链完成后才消耗 AP
+            return false;
         }
         case CardEffect::REMOVE_OPPONENT:
             std::cout << "[CardEffect] REMOVE_OPPONENT 尚未实现，预留框架。" << std::endl;
