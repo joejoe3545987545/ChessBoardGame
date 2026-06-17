@@ -20,7 +20,8 @@ public:
     ~Chessboard();
 
     void reset();
-    int checkPattern(int row, int col);
+    int checkPattern(int row, int col, int& outDir);  // outDir=触发方向索引, -1=无
+    void markPatternUsed(int row, int col, int dir);   // 沿方向标记连子为已使用
     int getPiece(int row, int col) const;
     bool handleMouseClick(sf::Vector2i mousePos, int turn, int& outRow, int& outCol);
     void placePieceByAI(int row, int col, int turn, int& outRow, int& outCol);
@@ -65,6 +66,7 @@ public:
 
 private:
     int grid[15][15];
+    int usedMask[15][15] = {};  // 每位对应一个方向: 0=H 1=V 2=↘ 3=↗
 
     sf::Texture boardTexture;
     sf::Texture blackTexture;

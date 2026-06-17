@@ -4,13 +4,13 @@
 #include <filesystem> // 确保引入了此头文件
 
 namespace {
-    const float STEP           = 36.0f;
+    const float STEP           = 72.0f;
     const int GRID_COUNT       = 15;
     const float GRID_SPAN      = (GRID_COUNT - 1) * STEP;
     const float BOARD_WIDTH    = GRID_SPAN + STEP;
     const float BOARD_HEIGHT   = BOARD_WIDTH;
-    const float START_X        = (1280.f - BOARD_WIDTH) * 0.5f + STEP * 0.5f;
-    const float START_Y        = (720.f - BOARD_HEIGHT) * 0.5f + STEP * 0.5f;
+    const float START_X        = (2560.f - BOARD_WIDTH) * 0.5f + STEP * 0.5f;
+    const float START_Y        = (1440.f - BOARD_HEIGHT) * 0.5f + STEP * 0.5f;
 
     // 🌟 引入与 GameEngine 一致的路径查找器
     std::string getResolvedPath(const std::string& relativePath) {
@@ -45,7 +45,7 @@ Chessboard::Chessboard()
     if (blackImage.loadFromFile(getResolvedPath("assets/black.png"))) {
         blackImage.createMaskFromColor(sf::Color(255, 255, 255), 0);
         if (blackTexture.loadFromImage(blackImage)) {
-            blackTexture.setSmooth(true);
+            blackTexture.setSmooth(false);
             blackSprite.setTexture(blackTexture, true);
             sf::Vector2u size = blackTexture.getSize();
             blackSprite.setOrigin({size.x / 2.f, size.y / 2.f});
@@ -57,7 +57,7 @@ Chessboard::Chessboard()
     if (whiteImage.loadFromFile(getResolvedPath("assets/white.png"))) {
         whiteImage.createMaskFromColor(sf::Color(255, 255, 255), 0);
         if (whiteTexture.loadFromImage(whiteImage)) {
-            whiteTexture.setSmooth(true);
+            whiteTexture.setSmooth(false);
             whiteSprite.setTexture(whiteTexture, true);
             sf::Vector2u size = whiteTexture.getSize();
             whiteSprite.setOrigin({size.x / 2.f, size.y / 2.f});
@@ -73,6 +73,7 @@ void Chessboard::reset() {
     for (int i = 0; i < 15; ++i) {
         for (int j = 0; j < 15; ++j) {
             grid[i][j] = 0;
+            usedMask[i][j] = 0;
         }
     }
     clearWinLine();
@@ -86,25 +87,56 @@ void Chessboard::reset() {
     stopReplay();
 }
 
-int Chessboard::checkPattern(int row, int col) {
+int Chessboard::checkPattern(int row, int col, int& outDir) {
     int turn = grid[row][col];
+    outDir = -1;
     if (turn == 0) return 0;
 
     int dx[] = {1, 0, 1, 1};
     int dy[] = {0, 1, 1, -1};
-
     for (int i = 0; i < 4; ++i) {
         int count = 1;
-        // 向两个方向统计连子
         int r1 = row + dy[i], c1 = col + dx[i];
         while (r1 >= 0 && r1 < 15 && c1 >= 0 && c1 < 15 && grid[r1][c1] == turn) { count++; r1 += dy[i]; c1 += dx[i]; }
         int r2 = row - dy[i], c2 = col - dx[i];
         while (r2 >= 0 && r2 < 15 && c2 >= 0 && c2 < 15 && grid[r2][c2] == turn) { count++; r2 -= dy[i]; c2 -= dx[i]; }
 
-        if (count == 4) return 4; // 触发四连
-        if (count == 3) return 3; // 触发三连
+        if (count == 3 || count == 4) {
+            // 检查连线上是否有棋子已被该方向标记
+            bool blocked = false;
+            int bit = (1 << i);
+            // 沿正方向扫描
+            for (int r = row, c = col; r >= 0 && r < 15 && c >= 0 && c < 15 && grid[r][c] == turn; r += dy[i], c += dx[i]) {
+                if (usedMask[r][c] & bit) { blocked = true; break; }
+            }
+            // 沿反方向扫描
+            if (!blocked) {
+                for (int r = row - dy[i], c = col - dx[i]; r >= 0 && r < 15 && c >= 0 && c < 15 && grid[r][c] == turn; r -= dy[i], c -= dx[i]) {
+                    if (usedMask[r][c] & bit) { blocked = true; break; }
+                }
+            }
+            if (!blocked) {
+                outDir = i;
+                return count; // 3 或 4
+            }
+        }
     }
     return 0;
+}
+
+void Chessboard::markPatternUsed(int row, int col, int dir) {
+    if (dir < 0 || dir >= 4) return;
+    int turn = grid[row][col];
+    if (turn == 0) return;
+    int dx[] = {1, 0, 1, 1};
+    int dy[] = {0, 1, 1, -1};
+    int bit = (1 << dir);
+    // 正方向
+    for (int r = row, c = col; r >= 0 && r < 15 && c >= 0 && c < 15 && grid[r][c] == turn; r += dy[dir], c += dx[dir])
+        usedMask[r][c] |= bit;
+    // 反方向
+    for (int r = row - dy[dir], c = col - dx[dir]; r >= 0 && r < 15 && c >= 0 && c < 15 && grid[r][c] == turn; r -= dy[dir], c -= dx[dir])
+        usedMask[r][c] |= bit;
 }
 
 int Chessboard::getPiece(int row, int col) const {
@@ -136,7 +168,7 @@ bool Chessboard::handleMouseClick(sf::Vector2i mousePos, int turn, int& outRow, 
         getGridPosition(row, col, centerX, centerY);
 
         float distance = std::sqrt(std::pow(mousePos.x - centerX, 2) + std::pow(mousePos.y - centerY, 2));
-        const float maxClickDistance = 20.0f;
+        const float maxClickDistance = 40.0f;
 
         if (distance <= maxClickDistance && grid[row][col] == 0) {
             grid[row][col] = turn;
@@ -354,8 +386,8 @@ void Chessboard::draw(sf::RenderWindow& window) {
             1.3f * BOARD_HEIGHT / static_cast<float>(boardTextureSize.y)
         });
     }
-    float boardCenterX = START_X + GRID_SPAN * 0.5f - 1.f;
-    float boardCenterY = START_Y + GRID_SPAN * 0.5f + 5.f;
+    float boardCenterX = START_X + GRID_SPAN * 0.5f + 0.0f;
+    float boardCenterY = START_Y + GRID_SPAN * 0.5f + 14.f;
     boardSprite.setPosition({boardCenterX, boardCenterY});
     window.draw(boardSprite);
 
@@ -380,7 +412,7 @@ void Chessboard::draw(sf::RenderWindow& window) {
                 sf::Texture& tx = (color == 1) ? blackTexture : whiteTexture;
                 sf::Vector2u ts = tx.getSize();
                 if (ts.x == 0 || ts.y == 0) return;
-                sp.setScale({34.2f / (float)ts.x, 34.2f / (float)ts.y});
+                sp.setScale({68.4f / (float)ts.x, 68.4f / (float)ts.y});
                 float px, py;
                 getGridPosition(i, j, px, py);
                 sp.setPosition({px, py});
@@ -462,12 +494,12 @@ void Chessboard::drawWinLineHighlight(sf::RenderWindow& window, int startRow, in
     for (int i = 0; i < 5; ++i) {
         getGridPosition(r, c, x, y);
 
-        sf::CircleShape highlight(22.f);  // 比棋子略大的圆圈
-        highlight.setOrigin({22.f, 22.f});
+        sf::CircleShape highlight(44.f);
+        highlight.setOrigin({44.f, 44.f});
         highlight.setPosition({x, y});
         highlight.setFillColor(sf::Color(0, 0, 0, 0));  // 透明填充
         highlight.setOutlineColor(sf::Color(255, 215, 0, 200));  // 金黄色边框
-        highlight.setOutlineThickness(3.f);
+        highlight.setOutlineThickness(6.f);
 
         window.draw(highlight);
 
@@ -503,7 +535,7 @@ void Chessboard::drawHoverRing(sf::RenderWindow& window, int currentTurn) {
             float distance = std::sqrt(std::pow(mousePos.x - centerX, 2) + std::pow(mousePos.y - centerY, 2));
 
             // 如果距离小于 5 像素（全屏后建议可以改到 10.0f 或 12.0f，体验会更丝滑），且无子
-            if (distance < 18.0f && grid[i][j] == 0) {
+            if (distance < 36.0f && grid[i][j] == 0) {
                 hoverGridPos = sf::Vector2i(i, j);
                 break;
             }
@@ -513,7 +545,7 @@ void Chessboard::drawHoverRing(sf::RenderWindow& window, int currentTurn) {
 
     // 4. 如果成功捕捉到了满足要求的预落子点，开始上色渲染
     if (hoverGridPos.x != -1) {
-        float ringRadius = 10.0f; // 保持你喜欢的精致小尺寸
+        float ringRadius = 20.0f;
         sf::CircleShape hoverRing(ringRadius);
         
         // 将原点设置为圆心，方便居中对齐交点坐标
@@ -530,7 +562,7 @@ void Chessboard::drawHoverRing(sf::RenderWindow& window, int currentTurn) {
         hoverRing.setFillColor(sf::Color(128, 128, 128, 180)); 
 
         // 设置外边框粗细
-        hoverRing.setOutlineThickness(1.5f); 
+        hoverRing.setOutlineThickness(3.f); 
 
         // 🌟【核心修改 2】：外面画个环，颜色由玩家执子决定
         if (currentTurn == 1) {

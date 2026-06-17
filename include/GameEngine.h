@@ -67,10 +67,10 @@ private:
 
     // ===== 窗口和显示设置 =====
     bool isFullscreen = true;   // 默认无边框全屏
-    sf::View gameView;          // 1280×720 逻辑视图
+    sf::View gameView;          // 2560×1440 逻辑视图
     void applyViewport();       // 计算比例保持的 viewport
-    static const unsigned int WINDOW_WIDTH = 1280;
-    static const unsigned int WINDOW_HEIGHT = 720;
+    static const unsigned int WINDOW_WIDTH = 2560;
+    static const unsigned int WINDOW_HEIGHT = 1440;
 
     // ===== 游戏状态 =====
     int currentTurn;          // 1: 黑, 2: 白
@@ -84,6 +84,9 @@ private:
     // 批量销毁队列（破釜沉舟等）
     std::vector<std::pair<int,int>> pendingDestroys;
     bool isBulkDestroying = false;      // 批量销毁进行中
+    bool isReturningHandToDeck = false; // 🌟 破釜沉舟退牌动画中
+    sf::Clock returnHandToDeckClock;    // 退牌动画计时器
+    int pendingSacrificeDestroys = 0;   // 退牌动画完成后待销毁的敌方棋子数
     bool isCardAttachedToMouse = false; // 🌟 标记卡牌是否吸附在鼠标上
     sf::Vector2f cardMouseOffset = {0.f, 0.f};
     DeckManager playerDeck;
@@ -104,6 +107,7 @@ private:
     void addActionPoint(bool canPiece, bool canCard); // 供卡牌效果调用：额外赠送特定行动点
     void settleActionPoints();                       // 🌟 总体行动点结算中心（决定回合是否结束）
     bool applyCardEffect(const Card& card);         // 🌟 卡牌效果分发器（true=即时完成 false=延迟）
+    void executeSacrificeDestroy(int destroyCount); // 🌟 破釜沉舟销毁阶段（退牌动画完成后调用）
 
     // ===== 人机对战设置 =====
     int playerColorPref;      // 1: 玩家执黑, 2: 玩家执白
@@ -181,7 +185,7 @@ private:
 
     // 🌟【新增：CardReader正下方的圆形检测区域】
     sf::CircleShape detectionZone;
-    float zoneRadius = 120.0f; // 暂定半径为50像素，后续可以根据实际大小微调
+    float zoneRadius = 240.0f; // 暂定半径为50像素，后续可以根据实际大小微调
 
     // 🌟【新增：卡牌高精动效时序控制器】
     sf::Clock cardAnimClock;      // 记录卡牌动画已经播了多久
@@ -227,6 +231,13 @@ private:
     std::unique_ptr<sf::Sprite> cardPortalTopSprite;
     std::unique_ptr<sf::Texture> cardPortalBottomTexture;
     std::unique_ptr<sf::Sprite> cardPortalBottomSprite;
+
+    // 🌟 主菜单背景图层素材
+    sf::Texture menuWhiteTex, menuBlackTex, menuFogTex;
+    sf::Sprite  menuWhiteSpr{menuWhiteTex};
+    sf::Sprite  menuBlackSpr{menuBlackTex};
+    sf::Sprite  menuFogSpr{menuFogTex};
+    sf::Clock   menuPieceClock;  // 菜单棋子抛物线动画时钟
 };
 
 #endif // GAMEENGINE_H

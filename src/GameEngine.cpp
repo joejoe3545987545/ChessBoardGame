@@ -109,8 +109,7 @@ GameEngine::GameEngine()
     initUI();
     initAudio();
 
-    // 设置 1280×720 逻辑视图，保持比例留黑边
-    gameView = sf::View(sf::FloatRect({0.f, 0.f}, {1280.f, 720.f}));
+    gameView = sf::View(sf::FloatRect({0.f, 0.f}, {2560.f, 1440.f}));
     applyViewport();
     window.setView(gameView);
 
@@ -125,9 +124,9 @@ GameEngine::GameEngine()
     }
 
     uiText.setFillColor(sf::Color(45, 45, 45));
-    uiText.setCharacterSize(18);
+    uiText.setCharacterSize(36);
 
-    timerText.setCharacterSize(22);
+    timerText.setCharacterSize(44);
     timerText.setStyle(sf::Text::Bold);
     timerText.setFillColor(sf::Color(40, 120, 40));
 
@@ -156,10 +155,10 @@ GameEngine::GameEngine()
         cardSlotSprite->setOrigin({slotSize.x / 2.f, slotSize.y / 2.f});
         
         // 2. 🌟 绝对同步：设置与卡牌完全相同的 0.18f 缩放
-        cardSlotSprite->setScale({0.25f, 0.25f});
+        cardSlotSprite->setScale({0.50f, 0.50f});
         
         // 3. 🌟 绝对同步：让卡槽永久锁死在你指定的卡牌原位中心点
-        cardSlotSprite->setPosition({1080.f, 166.f});
+        cardSlotSprite->setPosition({2260.f, 331.f});
     } else {
         std::cout << "[UI Error] 无法加载卡槽图片素材 CardSlot.png" << std::endl;
     }
@@ -175,9 +174,9 @@ GameEngine::GameEngine()
         
         // 💡 修复 2：SFML 3.0 的 sf::Rect 成员全面改为 position 和 size
         // left -> position.x ； width -> size.x
-        float centerX = 640;      // 水平居中
+        float centerX = 300;     // 与 CardReader X 对齐
         // top -> position.y ； height -> size.y
-        float centerY = 100; 
+        float centerY = 380;  // 检测区域位置
 
         // 💡 修复 3：SFML 3.0 的 setPosition 同样必须用大括号 {} 括起来
         detectionZone.setPosition({centerX, centerY});
@@ -195,8 +194,8 @@ GameEngine::GameEngine()
         cardSlotSprite2 = new sf::Sprite(cardSlotTexture2);
         sf::Vector2u slot2Size = cardSlotTexture2.getSize();
         cardSlotSprite2->setOrigin({slot2Size.x / 2.f, slot2Size.y / 2.f});
-        cardSlotSprite2->setScale({0.25f, 0.25f});
-        cardSlotSprite2->setPosition({1080.f, 486.f});  // 卡槽 1 下方 320px
+        cardSlotSprite2->setScale({0.50f, 0.50f});
+        cardSlotSprite2->setPosition({2260.f, 971.f});
     }
     // ============================================================================
     // 🌟【修正版】：完美适配 SFML 3.0 规范的读卡器夹层素材初始化
@@ -212,8 +211,8 @@ GameEngine::GameEngine()
         // 设置中心原点、缩放与位置
         sf::Vector2u size = cardReaderBottomTexture->getSize();
         cardReaderBottomSprite->setOrigin({size.x / 2.f, size.y / 2.f});
-        cardReaderBottomSprite->setScale({0.4f, 0.4f});
-        cardReaderBottomSprite->setPosition({640.f, 0.f}); 
+        cardReaderBottomSprite->setScale({0.8f, 0.8f});
+        cardReaderBottomSprite->setPosition({300.f, 210.f});
         
         std::cout << "[🎉 Success] 读卡器底座 CardReader_Bottom 初始化成功！" << std::endl;
     } else {
@@ -231,23 +230,23 @@ GameEngine::GameEngine()
         // 保持严丝合缝的对齐
         sf::Vector2u size = cardReaderTopTexture->getSize();
         cardReaderTopSprite->setOrigin({size.x / 2.f, size.y / 2.f});
-        cardReaderTopSprite->setScale({0.4f, 0.4f});
-        cardReaderTopSprite->setPosition({640.f, 0.f}); 
+        cardReaderTopSprite->setScale({0.8f, 0.8f});
+        cardReaderTopSprite->setPosition({300.f, 210.f});
         
         std::cout << "[🎉 Success] 读卡器滑盖 CardReader_Top 初始化成功！" << std::endl;
     } else {
         std::cerr << "[❌ UI Error] 无法加载素材 assets/CardReader_Top.png" << std::endl;
     }
 
-    // 🌟 CardPortal（下方，与 CardReader 对称，y=720）
+    // 🌟 CardPortal（下方，与 CardReader 对称，y=1440）
     cardPortalBottomTexture = std::make_unique<sf::Texture>();
     if (cardPortalBottomTexture->loadFromFile(getEngineAssetPath("assets/CardPortal_Bottom.png"))) {
         cardPortalBottomTexture->setSmooth(true);
         cardPortalBottomSprite = std::make_unique<sf::Sprite>(*cardPortalBottomTexture);
         sf::Vector2u pSize = cardPortalBottomTexture->getSize();
         cardPortalBottomSprite->setOrigin({pSize.x / 2.f, pSize.y / 2.f});
-        cardPortalBottomSprite->setScale({0.4f, 0.4f});
-        cardPortalBottomSprite->setPosition({640.f, 720.f});
+        cardPortalBottomSprite->setScale({0.8f, 0.8f});
+        cardPortalBottomSprite->setPosition({300.f, 1230.f});
     }
     cardPortalTopTexture = std::make_unique<sf::Texture>();
     if (cardPortalTopTexture->loadFromFile(getEngineAssetPath("assets/CardPortal_Top.png"))) {
@@ -255,8 +254,18 @@ GameEngine::GameEngine()
         cardPortalTopSprite = std::make_unique<sf::Sprite>(*cardPortalTopTexture);
         sf::Vector2u pSize = cardPortalTopTexture->getSize();
         cardPortalTopSprite->setOrigin({pSize.x / 2.f, pSize.y / 2.f});
-        cardPortalTopSprite->setScale({0.4f, 0.4f});
-        cardPortalTopSprite->setPosition({640.f, 720.f});
+        cardPortalTopSprite->setScale({0.8f, 0.8f});
+        cardPortalTopSprite->setPosition({300.f, 1230.f});
+    }
+
+    // 🌟 主菜单背景图层加载
+    if (menuWhiteTex.loadFromFile(getEngineAssetPath("assets/white_HR.png"))) {
+        menuWhiteSpr.setTexture(menuWhiteTex, true);
+        menuWhiteSpr.setOrigin({menuWhiteTex.getSize().x / 2.f, menuWhiteTex.getSize().y / 2.f});
+    }
+    if (menuBlackTex.loadFromFile(getEngineAssetPath("assets/black_HR.png"))) {
+        menuBlackSpr.setTexture(menuBlackTex, true);
+        menuBlackSpr.setOrigin({menuBlackTex.getSize().x / 2.f, menuBlackTex.getSize().y / 2.f});
     }
 
     std::cout << "[Info] GameEngine constructed." << std::endl;
@@ -303,38 +312,38 @@ void GameEngine::initUI() {
     };
 
     // 菜单按钮：宽度240，高度50，居中显示
-    const float menuButtonWidth = 240.f;
-    const float menuButtonHeight = 50.f;
+    const float menuButtonWidth = 320.f;
+    const float menuButtonHeight = 67.f;
     const float centerX = WINDOW_WIDTH * 0.5f;
-    const float menuStartY = 220.f;
+    const float menuStartY = 293.f;
     const float menuButtonX = centerX - menuButtonWidth * 0.5f;
 
     for (size_t i = 0; i < menuTexts.size(); ++i) {
         sf::RectangleShape bg({menuButtonWidth, menuButtonHeight});
-        bg.setPosition({menuButtonX, menuStartY + i * 80.f});
+        bg.setPosition({menuButtonX, menuStartY + i * 107.f});
         bg.setFillColor(sf::Color(212, 163, 107));
         menuButtonBackgrounds.push_back(bg);
 
-        sf::Text t(font, menuTexts[i], 20);
+        sf::Text t(font, menuTexts[i], 40);
         t.setFillColor(sf::Color(45, 45, 45));
         sf::FloatRect textBounds = t.getLocalBounds();
         t.setPosition(sf::Vector2f(
             centerX - (textBounds.position.x + textBounds.size.x) * 0.5f,
-            menuStartY + i * 80.f + (menuButtonHeight - textBounds.size.y) * 0.5f - textBounds.position.y));
+            menuStartY + i * 107.f + (menuButtonHeight - textBounds.size.y) * 0.5f - textBounds.position.y));
         menuButtons.push_back(t);
     }
 
     // 游戏HUD按钮：位于底部，3个按钮均匀分布
     std::vector<std::wstring> hudLabels = {L"认输放弃", L"重新开局", L"返回主页"};
     for (size_t i = 0; i < hudLabels.size(); ++i) {
-        sf::RectangleShape btn({120.f, 36.f});
-        btn.setPosition({static_cast<float>(80 + i * 400), 665.f});
+        sf::RectangleShape btn({180.f, 54.f});
+        btn.setPosition({static_cast<float>(120 + i * 600), 1020.f});
         btn.setFillColor(sf::Color(156, 107, 69));
         gameButtons.push_back(btn);
 
-        sf::Text t(font, hudLabels[i], 15);
+        sf::Text t(font, hudLabels[i], 30);
         t.setFillColor(sf::Color::White);
-        t.setPosition({static_cast<float>(95 + i * 400), 670.f});
+        t.setPosition({static_cast<float>(142.5f + i * 600), 1025.f});
         gameButtonTexts.push_back(t);
     }
 }
@@ -346,18 +355,14 @@ void GameEngine::toggleFullscreen() {
     window.close();
 
     if (isFullscreen) {
-        // 无边框全屏
         sf::VideoMode desktop = sf::VideoMode::getDesktopMode();
         window.create(desktop, "chessBoardGame (Professional Edition)",
                       sf::Style::None, sf::State::Windowed);
     } else {
-        // 1280×720 窗口
-        window.create(sf::VideoMode({WINDOW_WIDTH, WINDOW_HEIGHT}),
-                      "chessBoardGame (Professional Edition)",
+        window.create(sf::VideoMode({1920, 1080}), "chessBoardGame (Professional Edition)",
                       sf::Style::Default, sf::State::Windowed);
     }
-
-    gameView = sf::View(sf::FloatRect({0.f, 0.f}, {1280.f, 720.f}));
+    gameView = sf::View(sf::FloatRect({0.f, 0.f}, {2560.f, 1440.f}));
     applyViewport();
     window.setView(gameView);
     initUI();
@@ -368,17 +373,15 @@ void GameEngine::toggleFullscreen() {
 void GameEngine::applyViewport() {
     sf::Vector2u winSize = window.getSize();
     float windowRatio = static_cast<float>(winSize.x) / static_cast<float>(winSize.y);
-    float gameRatio   = 1280.f / 720.f;
-
+    float gameRatio   = 1920.f / 1080.f;
     if (windowRatio > gameRatio) {
-        // 窗口更宽 → 左右黑边
         float vpW = gameRatio / windowRatio;
         gameView.setViewport(sf::FloatRect({(1.f - vpW) / 2.f, 0.f}, {vpW, 1.f}));
-    } else {
-        // 窗口更高 → 上下黑边
+    } else if (windowRatio < gameRatio) {
         float vpH = windowRatio / gameRatio;
         gameView.setViewport(sf::FloatRect({0.f, (1.f - vpH) / 2.f}, {1.f, vpH}));
     }
+    // 等比时 viewport 保持全屏 (0,0,1,1)
 }
 
 // ------------------------ 主循环 ------------------------
@@ -435,7 +438,7 @@ void GameEngine::processEvents() {
                 }
                 else if (currentState == GameState::GAME_OVER) {
                     // 计算出屏幕正中心按钮的精确点击范围
-                    if (mousePos.x > 540 && mousePos.x < 740 && mousePos.y > 420 && mousePos.y < 470) {
+                    if (mousePos.x > 1180 && mousePos.x < 1380 && mousePos.y > 420 && mousePos.y < 470) {
                         std::cout << "[UI] Game Over Screen: Return to Main Menu clicked." << std::endl;
                         
                         chessboard.reset();
@@ -468,11 +471,11 @@ void GameEngine::processEvents() {
 
                     // 🎯 笼络选子模式：手动坐标转换检测有子格子
                     if (isSelectingPiece && !hudIntercepted) {
-                        const float BW = 15.f * 36.f; // BOARD_WIDTH
-                        float bx = (1280.f - BW) * 0.5f + 18.f;
-                        float by = (720.f  - BW) * 0.5f + 18.f;
-                        int col = static_cast<int>(std::round((mousePos.x - bx) / 36.f));
-                        int row = static_cast<int>(std::round((mousePos.y - by) / 36.f));
+                        const float BW = 15.f * 72.f; // BOARD_WIDTH (2K)
+                        float bx = (2560.f - BW) * 0.5f + 36.f;
+                        float by = (1440.f - BW) * 0.5f + 36.f;
+                        int col = static_cast<int>(std::round((mousePos.x - bx) / 72.f));
+                        int row = static_cast<int>(std::round((mousePos.y - by) / 72.f));
                         if (row >= 0 && row < 15 && col >= 0 && col < 15) {
                             int piece = chessboard.getPiece(row, col);
                             if (selectPieceStep == 1 && piece == selectPiecePlayer) {
@@ -480,7 +483,7 @@ void GameEngine::processEvents() {
                                 isBusyAnimating = true;
                                 selectPieceStep = 2;
                                 std::cout << "[Convert] 销毁动画启动。" << std::endl;
-                            } else if (selectPieceStep == 2) {
+                            } else if (selectPieceStep == 2 && !isBusyAnimating) {
                                 int enemy = (selectPiecePlayer == 1) ? 2 : 1;
                                 if (piece == enemy) {
                                     chessboard.startConvertAnim(row, col, enemy, selectPiecePlayer);
@@ -518,11 +521,13 @@ void GameEngine::processEvents() {
                         std::cout << "[Audio] Drop sound played." << std::endl;
 
                         // 点击成功立刻加入手牌数据系统（三子或四子连线抽卡）
-                        int pattern = chessboard.checkPattern(lastRow, lastCol);
+                        int dir = -1;
+                        int pattern = chessboard.checkPattern(lastRow, lastCol, dir);
                         if (pattern == 3 || pattern == 4) {
                             playerDeck.drawCard();
                             handSlotAssign.push_back(1);  // 新卡默认放入槽 1
                             newCardJustDrawn = true;      // 触发出生动画
+                            chessboard.markPatternUsed(lastRow, lastCol, dir); // 标记已使用
                         }
                         // 🎵 四子连星 → 危机触发，延长 battle_02 或作为切歌入口
                         if (pattern == 4) {
@@ -562,14 +567,14 @@ void GameEngine::processEvents() {
 }
 
 void GameEngine::handleMenuClick(sf::Vector2i mousePos) {
-    const float menuButtonWidth = 240.f;
+    const float menuButtonWidth = 320.f;
     const float centerX = WINDOW_WIDTH * 0.5f;
     const float menuButtonX = centerX - menuButtonWidth * 0.5f;
     const float menuButtonRightX = centerX + menuButtonWidth * 0.5f;
-    const float menuStartY = 220.f;
+    const float menuStartY = 293.f;
 
     if (mousePos.x > menuButtonX && mousePos.x < menuButtonRightX) {
-        if (mousePos.y > menuStartY && mousePos.y < menuStartY + 50.f) {
+        if (mousePos.y > menuStartY && mousePos.y < menuStartY + 67.f) {
             chessboard.reset();
             playerDeck.resetDeck();
             handSlotAssign.clear();
@@ -580,11 +585,12 @@ void GameEngine::handleMenuClick(sf::Vector2i mousePos) {
             selectPieceStep  = 0;
             pendingDestroys.clear();
             isBulkDestroying = false;
+            isReturningHandToDeck = false;
             newCardJustDrawn = false;
             showcaseState = CardShowcaseState::NONE;
             annihilateState = CardAnnihilateState::NONE;
             isReturningToSlot = false;
-            if (newCardSprite) newCardSprite->setPosition({1080.f, 160.f});
+            if (newCardSprite) newCardSprite->setPosition({2260.f, 160.f});
             battleMusic02.stop();
             battleMusicState = BattleMusicState::NORMAL;
             battleMusic.setVolume(BATTLE_VOLUME);
@@ -596,16 +602,16 @@ void GameEngine::handleMenuClick(sf::Vector2i mousePos) {
             initActionPointsForTurn();
             turnClock.restart();
         }
-        else if (mousePos.y > menuStartY + 80.f && mousePos.y < menuStartY + 130.f) {
+        else if (mousePos.y > menuStartY + 107.f && mousePos.y < menuStartY + 174.f) {
             currentState = GameState::PVE_CONFIG;
         }
-        else if (mousePos.y > menuStartY + 160.f && mousePos.y < menuStartY + 210.f) {
+        else if (mousePos.y > menuStartY + 214.f && mousePos.y < menuStartY + 281.f) {
             currentState = GameState::SETTINGS;
         }
-        else if (mousePos.y > menuStartY + 240.f && mousePos.y < menuStartY + 290.f) {
+        else if (mousePos.y > menuStartY + 321.f && mousePos.y < menuStartY + 388.f) {
             currentState = GameState::HELP;
         }
-        else if (mousePos.y > menuStartY + 320.f && mousePos.y < menuStartY + 370.f) {
+        else if (mousePos.y > menuStartY + 428.f && mousePos.y < menuStartY + 495.f) {
             currentState = GameState::HISTORY;
         }
     }
@@ -637,11 +643,12 @@ void GameEngine::handlePVEConfigClick(sf::Vector2i mousePos) {
             selectPieceStep  = 0;
             pendingDestroys.clear();
             isBulkDestroying = false;
+            isReturningHandToDeck = false;
             newCardJustDrawn = false;
             showcaseState = CardShowcaseState::NONE;
             annihilateState = CardAnnihilateState::NONE;
             isReturningToSlot = false;
-            if (newCardSprite) newCardSprite->setPosition({1080.f, 160.f});
+            if (newCardSprite) newCardSprite->setPosition({2260.f, 160.f});
             battleMusic02.stop();
             battleMusicState = BattleMusicState::NORMAL;
             battleMusic.setVolume(BATTLE_VOLUME);
@@ -676,7 +683,7 @@ bool GameEngine::handleHUDClick(sf::Vector2i mousePos) {
         sf::FloatRect cardClickRect;
         
         // 严格锁定你指定的卡牌物理宽高
-        sf::Vector2f cardSize(144.f, 200.f);
+        sf::Vector2f cardSize(288.f, 400.f);
         sf::Vector2f mouseClickPos(static_cast<float>(mousePos.x), static_cast<float>(mousePos.y));
         // 各槽独立顶卡索引
         int slot1Top = -1, slot2Top = -1;
@@ -691,7 +698,7 @@ bool GameEngine::handleHUDClick(sf::Vector2i mousePos) {
             sf::Vector2f worldPos = window.mapPixelToCoords(pixelPos);
             sf::Vector2f currentCardCenter = worldPos - cardMouseOffset;
             cardClickRect = sf::FloatRect(
-                {currentCardCenter.x - 72.f, currentCardCenter.y - 100.f}, cardSize);
+                {currentCardCenter.x - 144.f, currentCardCenter.y - 200.f}, cardSize);
         }
 
         // 🔍 非吸附态拾取：先槽2后槽1，显式计算无lambda
@@ -701,13 +708,13 @@ bool GameEngine::handleHUDClick(sf::Vector2i mousePos) {
                 int stack2 = 0;
                 for (int j = 0; j < slot2Top; ++j)
                     if (handSlotAssign[j] == 2) stack2++;
-                float x2 = 1008.f + stack2 * 3.f;
-                float y2 = 380.f  + stack2 * 3.f;
+                float x2 = 2116.f + stack2 * 6.f;
+                float y2 = 760.f  + stack2 * 6.f;
                 sf::FloatRect r2({x2, y2}, cardSize);
                 if (r2.contains(mouseClickPos)) {
                     attachedCardIndex = slot2Top;
-                    float cx2 = 1080.f + stack2 * 3.f;
-                    float cy2 = 480.f  + stack2 * 3.f;
+                    float cx2 = 2260.f + stack2 * 6.f;
+                    float cy2 = 960.f  + stack2 * 6.f;
                     cardMouseOffset = mouseClickPos - sf::Vector2f(cx2, cy2);
                     isCardAttachedToMouse = true;
                     isReturningToSlot = false;
@@ -720,13 +727,13 @@ bool GameEngine::handleHUDClick(sf::Vector2i mousePos) {
                 int stack1 = 0;
                 for (int j = 0; j < slot1Top; ++j)
                     if (handSlotAssign[j] == 1) stack1++;
-                float x1 = 1008.f + stack1 * 3.f;
-                float y1 = 60.f   + stack1 * 3.f;
+                float x1 = 2116.f + stack1 * 6.f;
+                float y1 = 120.f  + stack1 * 6.f;
                 sf::FloatRect r1({x1, y1}, cardSize);
                 if (r1.contains(mouseClickPos)) {
                     attachedCardIndex = slot1Top;
-                    float cx1 = 1080.f + stack1 * 3.f;
-                    float cy1 = 160.f  + stack1 * 3.f;
+                    float cx1 = 2260.f + stack1 * 6.f;
+                    float cy1 = 320.f  + stack1 * 6.f;
                     cardMouseOffset = mouseClickPos - sf::Vector2f(cx1, cy1);
                     isCardAttachedToMouse = true;
                     isReturningToSlot = false;
@@ -742,8 +749,8 @@ bool GameEngine::handleHUDClick(sf::Vector2i mousePos) {
                 // 2. 🌟【核心改动】从【鼠标吸附】 ➡️ 【松开卡牌】
                 
                 // 📐 计算当前点击位置到圆形区域中心 (640, 100) 的距离
-                float dx = mouseClickPos.x - 640.f;
-                float dy = mouseClickPos.y - 100.f;
+                float dx = mouseClickPos.x - 300.f;
+                float dy = mouseClickPos.y - 380.f;
                 float distance = std::sqrt(dx * dx + dy * dy);
 
                 if (distance <= zoneRadius) {
@@ -780,8 +787,8 @@ bool GameEngine::handleHUDClick(sf::Vector2i mousePos) {
                 }
                 else {
                     // 🔮 分支乙：点击在圆外 ➡️ 检查是否落在槽位存放区
-                    sf::FloatRect slot1Zone({1008.f, 60.f},  cardSize);
-                    sf::FloatRect slot2Zone({1008.f, 380.f}, cardSize);
+                    sf::FloatRect slot1Zone({2116.f, 120.f}, cardSize);
+                    sf::FloatRect slot2Zone({2116.f, 760.f}, cardSize);
 
                     isCardAttachedToMouse = false;
                     isReturningToSlot = true;
@@ -812,14 +819,14 @@ bool GameEngine::handleHUDClick(sf::Vector2i mousePos) {
         }
     }
     // 1. 处理底部 HUD 按钮区域 (y: 665-701)
-    if (mousePos.y > 665 && mousePos.y < 701) {
-        if (mousePos.x > 80 && mousePos.x < 200) {
+    if (mousePos.y > 1020 && mousePos.y < 1074) {
+        if (mousePos.x > 120 && mousePos.x < 300) {
             winReason = (currentTurn == 1) ? L"黑方认输，白方获胜！" : L"白方认输，黑方获胜！";
             isGameOver = true;
             currentState = GameState::GAME_OVER;
             return true; // 告知外部：点击已被处理
         }
-        else if (mousePos.x > 480 && mousePos.x < 600) { // 重新开局
+        else if (mousePos.x > 720 && mousePos.x < 900) { // 重新开局
             chessboard.reset();
             newCardJustDrawn = false;
             handSlotAssign.clear();
@@ -830,7 +837,8 @@ bool GameEngine::handleHUDClick(sf::Vector2i mousePos) {
             selectPieceStep  = 0;
             pendingDestroys.clear();
             isBulkDestroying = false;
-            if (newCardSprite) newCardSprite->setPosition({1080.f, 160.f});
+            isReturningHandToDeck = false;
+            if (newCardSprite) newCardSprite->setPosition({2260.f, 160.f});
             battleMusic.stop();
             battleMusic.play();
             battleMusic02.stop();
@@ -856,10 +864,10 @@ bool GameEngine::handleHUDClick(sf::Vector2i mousePos) {
             }
             return true; // 告知外部：点击已被处理
         }
-        else if (mousePos.x > 880 && mousePos.x < 1000) { // 返回主菜单
-            
-            // 🌟【确切位置 2】：在此处精准添加，保证中途退出返回主菜单时重置卡牌隐藏状态
-
+        else if (mousePos.x > 1320 && mousePos.x < 1500) { // 返回主菜单
+            battleMusic.stop();
+            battleMusic02.stop();
+            battleMusicState = BattleMusicState::NORMAL;
             currentState = GameState::MENU;
             return true; // 告知外部：点击已被处理
         }
@@ -943,9 +951,10 @@ void GameEngine::update() {
         if (static_cast<int>(menuMusic.getStatus()) != 2) menuMusic.play();
         if (static_cast<int>(configMusic.getStatus()) == 2) configMusic.stop();
         if (static_cast<int>(battleMusic.getStatus()) == 2) battleMusic.stop();
+        if (static_cast<int>(battleMusic02.getStatus()) == 2) battleMusic02.stop();
         if (static_cast<int>(winMusic.getStatus()) == 2)    winMusic.stop();
         if (static_cast<int>(failMusic.getStatus()) == 2)   failMusic.stop();
-    } 
+    }
     else if (currentState == GameState::PVE_CONFIG) {
         if (static_cast<int>(configMusic.getStatus()) != 2) configMusic.play();
         if (static_cast<int>(menuMusic.getStatus()) == 2) menuMusic.stop();
@@ -960,7 +969,7 @@ void GameEngine::update() {
         if (static_cast<int>(winMusic.getStatus()) == 2)    winMusic.stop();
         if (static_cast<int>(failMusic.getStatus()) == 2)   failMusic.stop();
 
-        // ── 战斗音乐状态机 ──
+        // ── 战斗音乐状态机（串行过渡：先淡出→停→再淡入，两音轨永不重叠）──
         switch (battleMusicState) {
             case BattleMusicState::NORMAL:
                 if (static_cast<int>(battleMusic.getStatus()) != 2) battleMusic.play();
@@ -968,43 +977,51 @@ void GameEngine::update() {
                 break;
 
             case BattleMusicState::SWITCHING_TO_02: {
-                float progress = crossfadeClock.getElapsedTime().asSeconds() / CROSSFADE_DURATION;
-                if (progress >= 1.f) {
-                    battleMusic.setVolume(0.f);
+                // Phase 1 (0~1s): 淡出 battleMusic
+                // Phase 2 (1~2s): 停 battleMusic，淡入 battleMusic02
+                float t = crossfadeClock.getElapsedTime().asSeconds();
+                if (t < 1.0f) {
+                    battleMusic.setVolume(BATTLE_VOLUME * (1.f - t));
+                    if (static_cast<int>(battleMusic.getStatus()) != 2) battleMusic.play();
+                } else if (t < 2.0f) {
+                    if (static_cast<int>(battleMusic.getStatus()) == 2) battleMusic.stop();
+                    float t2 = t - 1.0f;
+                    battleMusic02.setVolume(BATTLE_VOLUME * t2);
+                    if (static_cast<int>(battleMusic02.getStatus()) != 2) battleMusic02.play();
+                } else {
                     battleMusic02.setVolume(BATTLE_VOLUME);
                     battleMusicState = BattleMusicState::BATTLE_02;
                     battle02Remaining = BATTLE_02_BASE_TIME;
                     battleTimer.restart();
-                } else {
-                    battleMusic.setVolume(BATTLE_VOLUME * (1.f - progress));
-                    battleMusic02.setVolume(BATTLE_VOLUME * progress);
                 }
-                if (static_cast<int>(battleMusic.getStatus()) != 2) battleMusic.play();
-                if (static_cast<int>(battleMusic02.getStatus()) != 2) battleMusic02.play();
                 break;
             }
 
-            case BattleMusicState::BATTLE_02: {
+            case BattleMusicState::BATTLE_02:
+                if (static_cast<int>(battleMusic02.getStatus()) != 2) battleMusic02.play();
+                battleMusic02.setVolume(BATTLE_VOLUME);
                 if (battleTimer.getElapsedTime().asSeconds() >= battle02Remaining) {
                     battleMusicState = BattleMusicState::SWITCHING_TO_01;
                     crossfadeClock.restart();
                 }
-                if (static_cast<int>(battleMusic02.getStatus()) != 2) battleMusic02.play();
                 break;
-            }
 
             case BattleMusicState::SWITCHING_TO_01: {
-                float progress = crossfadeClock.getElapsedTime().asSeconds() / CROSSFADE_DURATION;
-                if (progress >= 1.f) {
-                    battleMusic02.setVolume(0.f);
+                // Phase 1 (0~1s): 淡出 battleMusic02
+                // Phase 2 (1~2s): 停 battleMusic02，淡入 battleMusic
+                float t = crossfadeClock.getElapsedTime().asSeconds();
+                if (t < 1.0f) {
+                    battleMusic02.setVolume(BATTLE_VOLUME * (1.f - t));
+                    if (static_cast<int>(battleMusic02.getStatus()) != 2) battleMusic02.play();
+                } else if (t < 2.0f) {
+                    if (static_cast<int>(battleMusic02.getStatus()) == 2) battleMusic02.stop();
+                    float t2 = t - 1.0f;
+                    battleMusic.setVolume(BATTLE_VOLUME * t2);
+                    if (static_cast<int>(battleMusic.getStatus()) != 2) battleMusic.play();
+                } else {
                     battleMusic.setVolume(BATTLE_VOLUME);
                     battleMusicState = BattleMusicState::NORMAL;
-                } else {
-                    battleMusic02.setVolume(BATTLE_VOLUME * (1.f - progress));
-                    battleMusic.setVolume(BATTLE_VOLUME * progress);
                 }
-                if (static_cast<int>(battleMusic.getStatus()) != 2) battleMusic.play();
-                if (static_cast<int>(battleMusic02.getStatus()) != 2) battleMusic02.play();
                 break;
             }
         }
@@ -1087,6 +1104,20 @@ void GameEngine::update() {
 
     if (currentState != GameState::GAME_PVP && currentState != GameState::GAME_PVE) return;
 
+    // 🌟 破釜沉舟退牌动画完成处理
+    if (isReturningHandToDeck && returnHandToDeckClock.getElapsedTime().asSeconds() >= 1.0f) {
+        // 退牌动画结束，正式将手牌移回牌库
+        for (size_t i = 0; i < playerDeck.hand.size(); ++i)
+            playerDeck.deck.push_back(playerDeck.hand[i]);
+        playerDeck.hand.clear();
+        handSlotAssign.clear();
+        attachedCardIndex = -1;
+        isReturningHandToDeck = false;
+        std::cout << "[Sacrifice] 退牌动画完成，手牌已返还牌库。" << std::endl;
+        // 进入销毁阶段
+        executeSacrificeDestroy(pendingSacrificeDestroys);
+    }
+
     // 🎬 棋子动画完成处理（笼络 + 批量销毁）
     if (chessboard.updatePieceAnim()) {
         int ar = chessboard.animRow, ac = chessboard.animCol;
@@ -1103,7 +1134,12 @@ void GameEngine::update() {
                 chessboard.startDestroyAnim(p.first, p.second);
             } else {
                 isBulkDestroying = false;
+            isReturningHandToDeck = false;
                 isBusyAnimating = false;
+                if (isTurnPaused) {
+                    turnTimePaused += pauseClock.getElapsedTime().asSeconds();
+                    isTurnPaused = false;
+                }
                 consumeActionPoint(false);
                 settleActionPoints();
                 std::cout << "[Sacrifice] 批量销毁完成。" << std::endl;
@@ -1123,6 +1159,10 @@ void GameEngine::update() {
             chessboard.finishPieceAnim();
             selectPieceStep = 0;
             isBusyAnimating = false;
+            if (isTurnPaused) {
+                turnTimePaused += pauseClock.getElapsedTime().asSeconds();
+                isTurnPaused = false;
+            }
             consumeActionPoint(false);
             handled = true;
             if (chessboard.checkWin(ar, ac)) {
@@ -1244,10 +1284,10 @@ void GameEngine::update() {
 
 // ------------------------ 渲染 ------------------------
 void GameEngine::render() {
-    // 全屏清黑 → 黑边；再在 1280×720 区域画游戏背景
+    // 先清全屏黑 → 黑边；再在 2560×1440 区域画游戏背景
     window.clear(sf::Color::Black);
     window.setView(gameView);
-    sf::RectangleShape gameBG({1280.f, 720.f});
+    sf::RectangleShape gameBG({2560.f, 1440.f});
     gameBG.setFillColor(sf::Color(250, 215, 175));
     window.draw(gameBG);
 
@@ -1280,11 +1320,51 @@ void GameEngine::render() {
 }
 
 void GameEngine::renderMenu() {
+    // ── 第 0 层：灰色背景底 ──
+    sf::RectangleShape menuBG({2560.f, 1440.f});
+    menuBG.setFillColor(sf::Color(60, 60, 65));
+    window.draw(menuBG);
+
+    // ── 抛物线动画计算 ──
+    const float DURATION = 30.f;  // 单程 30 秒
+    float elapsed = menuPieceClock.getElapsedTime().asSeconds();
+    float raw = fmodf(elapsed, 2.f * DURATION);
+    float t = (raw < DURATION) ? (raw / DURATION) : (2.f - raw / DURATION);  // 0→1→0 循环
+    float et = t * t * (3.f - 2.f * t);  // smoothstep
+    float arc = 300.f * sinf(3.14159f * et);  // 抛物线弧高 300px
+
+    // 旋转：2°/s，白顺黑逆
+    float rotAngle = elapsed * 3.f;
+
+    // 白子：左下 (50,1480) → 右上 (1840,0)
+    float wx = 50.f  + (1840.f - 50.f)  * et;
+    float wy = 1480.f + (0.f - 1480.f) * et - arc;
+    // 黑子：右上 (2510,-40) → 左下 (720,1440)
+    float bx = 2510.f + (720.f - 2510.f) * et;
+    float by = -40.f  + (1440.f - (-40.f)) * et - arc;
+
+    // ── 第 1 层：白子 ──
+    float ww = static_cast<float>(menuWhiteTex.getSize().x);
+    float wh = static_cast<float>(menuWhiteTex.getSize().y);
+    menuWhiteSpr.setScale({1013.f / ww, 1003.5f / wh});
+    menuWhiteSpr.setPosition({wx, wy});
+    menuWhiteSpr.setRotation(sf::degrees(rotAngle));       // 顺时针
+    window.draw(menuWhiteSpr);
+
+    // ── 第 2 层：黑子 ──
+    float bw = static_cast<float>(menuBlackTex.getSize().x);
+    float bh = static_cast<float>(menuBlackTex.getSize().y);
+    menuBlackSpr.setScale({1013.f / bw, 1003.5f / bh});
+    menuBlackSpr.setPosition({bx, by});
+    menuBlackSpr.setRotation(sf::degrees(-rotAngle));      // 逆时针
+    window.draw(menuBlackSpr);
+
+    // ── 第 4 层：UI 渲染在最上面 ──
     uiText.setCharacterSize(72);
-    uiText.setFillColor(sf::Color(100, 60, 30));
+    uiText.setFillColor(sf::Color(220, 200, 160));
     uiText.setString(sf::String(L"五子棋"));
     sf::FloatRect titleBounds = uiText.getLocalBounds();
-    uiText.setPosition(sf::Vector2f(WINDOW_WIDTH * 0.5f - titleBounds.size.x * 0.5f, 90.f));
+    uiText.setPosition(sf::Vector2f(WINDOW_WIDTH * 0.5f - titleBounds.size.x * 0.5f, 120.f));
     window.draw(uiText);
 
     for (auto& bg : menuButtonBackgrounds) window.draw(bg);
@@ -1308,7 +1388,7 @@ void GameEngine::renderPVEConfig() {
     btn1.setFillColor(sf::Color(218, 171, 118));
     window.draw(btn1);
 
-    uiText.setCharacterSize(18);
+    uiText.setCharacterSize(36);
     uiText.setFillColor(sf::Color(60, 40, 20));
 
     std::wstring diffText;
@@ -1395,7 +1475,7 @@ void GameEngine::renderGameplay() {
             else if (annihilateState != CardAnnihilateState::NONE) activeIdx = attachedCardIndex;
             else if (isReturningToSlot)         activeIdx = attachedCardIndex;
             else                                activeIdx = static_cast<int>(playerDeck.hand.size() - 1);
-            sf::Vector2f targetPos(1080.f, 160.f);  // 默认槽1，防未初始化
+            sf::Vector2f targetPos(2260.f, 240.f);  // 默认槽1，防未初始化
             // 同步保护：两向量必须等长（湮灭期间跳过，避免干扰 activeIdx）
             if (annihilateState == CardAnnihilateState::NONE &&
                 handSlotAssign.size() != playerDeck.hand.size()) {
@@ -1404,39 +1484,74 @@ void GameEngine::renderGameplay() {
             sf::Vector2f preLoopPos = newCardSprite->getPosition();
 
             for (int slot = 1; slot <= 2; ++slot) {
-                float baseX = 1080.f;
-                float baseY = (slot == 1) ? 160.f : 480.f;
+                float baseX = 2260.f;
+                float baseY = (slot == 1) ? 320.f : 960.f;
                 int stackIdx = 0;
                 for (size_t i = 0; i < playerDeck.hand.size(); ++i) {
                     if (handSlotAssign[i] != slot) continue;
-                    sf::Vector2f offset(stackIdx * 3.f, stackIdx * 3.f);
+                    sf::Vector2f offset(stackIdx * 6.f, stackIdx * 6.f);
                     sf::Vector2f cardPos(baseX + offset.x, baseY + offset.y);
 
                     if (static_cast<int>(i) == activeIdx) {
                         targetPos = cardPos; // 活跃卡回归点
                     } else {
                         // 静态卡牌：完整渲染 + 槽顶卡文字
-                        newCardSprite->setScale({0.18f, 0.18f});
+                        newCardSprite->setScale({0.36f, 0.36f});
                         newCardSprite->setPosition(cardPos);
                         sf::Vector2u texSize = newCardTexture.getSize();
-                        newCardSprite->setTextureRect(sf::IntRect({0, 0}, {static_cast<int>(texSize.x), static_cast<int>(texSize.y)}));
-                        newCardSprite->setColor(sf::Color(255, 255, 255, 255));
-                        window.draw(*newCardSprite, sf::BlendAlpha);
-                        // 每张卡都渲染文字，渲染顺序天然保证上层遮下层
-                        {
-                            const auto& sc = playerDeck.hand[i];
-                            uiText.setFont(cardFont);
-                            uiText.setCharacterSize(14);
-                            uiText.setFillColor(sf::Color(255, 255, 255, 255));
-                            uiText.setString(sc.name);
-                            uiText.setPosition({cardPos.x - 26.f, cardPos.y - 82.f});
-                            window.draw(uiText);
-                            uiText.setCharacterSize(11);
-                            uiText.setFillColor(sf::Color(230, 230, 230, 255));
-                            uiText.setString(sc.description);
-                            uiText.setPosition({cardPos.x - 44.f, cardPos.y - 45.f});
-                            window.draw(uiText);
-                            uiText.setFont(font);
+
+                        if (isReturningHandToDeck) {
+                            // 🌟 退牌反向动画：裁剪 100%→0% + 白光 0%→100%（镜像出生动画）
+                            float t = returnHandToDeckClock.getElapsedTime().asSeconds();
+                            if (t > 1.0f) t = 1.0f;
+                            float heightPct = 1.0f - t;
+                            float whitePct  = t;
+                            int clipH = static_cast<int>(texSize.y * heightPct);
+                            newCardSprite->setTextureRect(sf::IntRect({0, 0}, {static_cast<int>(texSize.x), clipH}));
+                            // BlendAlpha 基底
+                            newCardSprite->setColor(sf::Color(255, 255, 255, 255));
+                            window.draw(*newCardSprite, sf::BlendAlpha);
+                            // BlendAdd 白光叠层（逐渐变亮直到纯白消失）
+                            uint8_t w = static_cast<uint8_t>(255 * whitePct);
+                            newCardSprite->setColor(sf::Color(w, w, w, 255));
+                            window.draw(*newCardSprite, sf::BlendAdd);
+                            // 文字同步渐隐
+                            if (heightPct > 0.02f) {
+                                uint8_t ta = static_cast<uint8_t>(255 * heightPct);
+                                const auto& sc = playerDeck.hand[i];
+                                uiText.setFont(cardFont);
+                                uiText.setCharacterSize(28);
+                                uiText.setFillColor(sf::Color(255, 255, 255, ta));
+                                uiText.setString(sc.name);
+                                uiText.setPosition({cardPos.x - 52.f, cardPos.y - 164.f});
+                                window.draw(uiText);
+                                uiText.setCharacterSize(22);
+                                uiText.setFillColor(sf::Color(230, 230, 230, ta));
+                                uiText.setString(sc.description);
+                                uiText.setPosition({cardPos.x - 88.f, cardPos.y - 90.f});
+                                window.draw(uiText);
+                                uiText.setFont(font);
+                            }
+                        } else {
+                            newCardSprite->setTextureRect(sf::IntRect({0, 0}, {static_cast<int>(texSize.x), static_cast<int>(texSize.y)}));
+                            newCardSprite->setColor(sf::Color(255, 255, 255, 255));
+                            window.draw(*newCardSprite, sf::BlendAlpha);
+                            // 每张卡都渲染文字，渲染顺序天然保证上层遮下层
+                            {
+                                const auto& sc = playerDeck.hand[i];
+                                uiText.setFont(cardFont);
+                                uiText.setCharacterSize(28);
+                                uiText.setFillColor(sf::Color(255, 255, 255, 255));
+                                uiText.setString(sc.name);
+                                uiText.setPosition({cardPos.x - 52.f, cardPos.y - 164.f});
+                                window.draw(uiText);
+                                uiText.setCharacterSize(22);
+                                uiText.setFillColor(sf::Color(230, 230, 230, 255));
+                                uiText.setString(sc.description);
+                                uiText.setPosition({cardPos.x - 88.f, cardPos.y - 90.f});
+                                window.draw(uiText);
+                                uiText.setFont(font);
+                            }
                         }
                     }
                     stackIdx++;
@@ -1459,6 +1574,7 @@ void GameEngine::renderGameplay() {
             // ============================================================
             {
             sf::Vector2f cardPos;
+            bool cardAlreadyRendered = false;  // MOVE_TO_ZERO 完成帧防双重渲染
 
                 if (isCardAttachedToMouse) {
                     // 1. 正常吸附鼠标状态
@@ -1483,7 +1599,7 @@ void GameEngine::renderGameplay() {
 
                         case CardAnnihilateState::MOVE_TO_200: {
                             // 🎯 设定第二阶段的目标过渡坐标
-                            sf::Vector2f targetAnnihilatePos(640.f, 200.f);
+                            sf::Vector2f targetAnnihilatePos(300.f, 400.f);
 
                             // 🚀 核心缓动算法：先快后慢的指数级缓出曲线 (与飞回卡槽的因子 0.07f 完美同步)
                             cardPos.x = cardPos.x + (targetAnnihilatePos.x - cardPos.x) * 0.07f;
@@ -1508,7 +1624,7 @@ void GameEngine::renderGameplay() {
 
                         case CardAnnihilateState::PAUSE_AFTER:
                             // 【阶段 3】：在 (640, 200) 稳稳卡住停顿 0.5 秒
-                            cardPos = {640.f, 200.f};
+                            cardPos = {300.f, 400.f};
                             if (elapsed >= 0.5f) {
                                 annihilateState = CardAnnihilateState::MOVE_TO_ZERO;
                                 annihilateClock.restart();
@@ -1517,17 +1633,18 @@ void GameEngine::renderGameplay() {
                             break;
 
                         case CardAnnihilateState::MOVE_TO_ZERO: {
-                            // 【阶段 4】：缓动滑入读卡器 Y=0，到达即完成
-                            float startY = 200.f;  // MOVE_TO_200 落点
-                            float duration = 0.6f;
+                            // 【阶段 4】：缓动滑入读卡器，到达即完成
+                            float startY = 400.f;  // MOVE_TO_200 落点
+                            float targetY = 210.f; // CardReader Y
+                            float duration = 0.35f;
                             float t = elapsed / duration;
                             if (t > 1.f) t = 1.f;
                             float eased = t * t * (3.f - 2.f * t);  // smoothstep
-                            float curY = startY + (0.f - startY) * eased;
-                            cardPos = {640.f, curY};
+                            float curY = startY + (targetY - startY) * eased;
+                            cardPos = {300.f, curY};
 
                             // 正常绘制卡牌（跟随位移，无裁剪/淡出）
-                            newCardSprite->setScale({0.18f, 0.18f});
+                            newCardSprite->setScale({0.36f, 0.36f});
                             newCardSprite->setPosition(cardPos);
                             sf::Vector2u texSize = newCardTexture.getSize();
                             newCardSprite->setTextureRect(sf::IntRect({0, 0}, {static_cast<int>(texSize.x), static_cast<int>(texSize.y)}));
@@ -1538,10 +1655,10 @@ void GameEngine::renderGameplay() {
                             if (!playerDeck.hand.empty() && activeIdx >= 0) {
                                 const auto& currentCard = playerDeck.hand[activeIdx];
                                 uiText.setFont(cardFont);
-                                uiText.setCharacterSize(14);
+                                uiText.setCharacterSize(28);
                                 uiText.setFillColor(sf::Color(255, 255, 255, 255));
                                 uiText.setString(currentCard.name);
-                                uiText.setPosition({cardPos.x - 26.f, cardPos.y - 82.f});
+                                uiText.setPosition({cardPos.x - 52.f, cardPos.y - 164.f});
                                 window.draw(uiText);
                                 uiText.setFont(font);
                             }
@@ -1556,7 +1673,8 @@ void GameEngine::renderGameplay() {
                                     std::cout << "[Annihilate] 卡牌已吸入读卡器，正式湮灭！" << std::endl;
                                     showcaseState = CardShowcaseState::PAUSE;
                                     showcaseClock.restart();
-                                    newCardSprite->setPosition({640.f, 360.f});
+                                    cardAlreadyRendered = true;  // 防本帧二次渲染
+                                    newCardSprite->setPosition({300.f, 540.f});
                                     annihilateState = CardAnnihilateState::NONE;
                                 }
                             }
@@ -1592,14 +1710,48 @@ void GameEngine::renderGameplay() {
                 }
                 
                 if (annihilateState != CardAnnihilateState::PAUSE_FINAL
-                    && annihilateState != CardAnnihilateState::MOVE_TO_ZERO) {
-                // 更新卡牌位置并锁死 0.18 的微缩缩放比例
-                newCardSprite->setScale({0.18f, 0.18f});
-                newCardSprite->setPosition(cardPos); 
+                    && annihilateState != CardAnnihilateState::MOVE_TO_ZERO
+                    && !cardAlreadyRendered) {
+                // 更新卡牌位置并锁死缩放比例
+                newCardSprite->setScale({0.36f, 0.36f});
+                newCardSprite->setPosition(cardPos);
 
                 // 获取纹理的原始完整物理尺寸
                 sf::Vector2u texSize = newCardTexture.getSize();
 
+                if (isReturningHandToDeck) {
+                    // 🌟 退牌反向动画（槽顶卡版）：裁剪 100%→0% + 白光 0%→100%
+                    float t = returnHandToDeckClock.getElapsedTime().asSeconds();
+                    if (t > 1.0f) t = 1.0f;
+                    float heightPct = 1.0f - t;
+                    float whitePct  = t;
+                    int clipH = static_cast<int>(texSize.y * heightPct);
+                    newCardSprite->setTextureRect(sf::IntRect({0, 0}, {static_cast<int>(texSize.x), clipH}));
+                    newCardSprite->setColor(sf::Color(255, 255, 255, 255));
+                    window.draw(*newCardSprite, sf::BlendAlpha);
+                    uint8_t w = static_cast<uint8_t>(255 * whitePct);
+                    newCardSprite->setColor(sf::Color(w, w, w, 255));
+                    window.draw(*newCardSprite, sf::BlendAdd);
+                    // 文字渐隐
+                    if (heightPct > 0.02f && activeIdx >= 0) {
+                        uint8_t ta = static_cast<uint8_t>(255 * heightPct);
+                        const auto& currentCard = playerDeck.hand[activeIdx];
+                        uiText.setFont(cardFont);
+                        uiText.setCharacterSize(28);
+                        uiText.setFillColor(sf::Color(255, 255, 255, ta));
+                        uiText.setString(currentCard.name);
+                        uiText.setPosition({cardPos.x - 52.f, cardPos.y - 164.f});
+                        window.draw(uiText);
+                        if (heightPct > 0.40f) {
+                            uiText.setCharacterSize(22);
+                            uiText.setFillColor(sf::Color(230, 230, 230, ta));
+                            uiText.setString(currentCard.description);
+                            uiText.setPosition({cardPos.x - 88.f, cardPos.y - 90.f});
+                            window.draw(uiText);
+                        }
+                        uiText.setFont(font);
+                    }
+                } else {
                 // 🌟 动效一：连续插值替代固定50段量化，消除帧率拍频闪烁
                 float currentHeightPercent = animTime / 1.0f;  // 0.0 → 1.0 连续增长
                 if (currentHeightPercent > 1.f) currentHeightPercent = 1.f;
@@ -1609,13 +1761,17 @@ void GameEngine::renderGameplay() {
                 if (isReturningToSlot && returnDelayClock.getElapsedTime().asSeconds() >= 0.3f) {
                     currentHeightPercent = 1.f;
                 }
+                // 🔒 湮灭期间强制全显，抑制出生动画裁剪/白光闪烁
+                if (annihilateState != CardAnnihilateState::NONE) {
+                    currentHeightPercent = 1.f;
+                }
                 int currentRectHeight = static_cast<int>(texSize.y * currentHeightPercent);
 
                 // 应用 50 阶微级阶梯裁剪矩形
                 newCardSprite->setTextureRect(sf::IntRect({0, 0}, {static_cast<int>(texSize.x), currentRectHeight}));
 
-                // 🌟 动效二：【1.5秒纯白褪去变原色】
-                if (animTime <= 1.5f) {
+                // 🌟 动效二：【1.5秒纯白褪去变原色】（湮灭期间跳过）
+                if (animTime <= 1.5f && annihilateState == CardAnnihilateState::NONE) {
                     float whiteProgress = 1.0f - (animTime / 1.5f);
                     if (whiteProgress < 0.f) whiteProgress = 0.f;
 
@@ -1627,7 +1783,7 @@ void GameEngine::renderGameplay() {
                     uint8_t whiteEmit = static_cast<uint8_t>(255 * whiteProgress);
                     newCardSprite->setColor(sf::Color(whiteEmit, whiteEmit, whiteEmit, 255));
                     window.draw(*newCardSprite, sf::BlendAdd);
-                } 
+                }
                 else {
                     newCardSprite->setColor(sf::Color(255, 255, 255, 255));
                     window.draw(*newCardSprite, sf::BlendAlpha);
@@ -1639,33 +1795,34 @@ void GameEngine::renderGameplay() {
                     const auto& currentCard = playerDeck.hand[activeIdx];
                     uiText.setFont(cardFont);
 
-                    float textFadeFactor = animTime / 0.3f; 
+                    float textFadeFactor = animTime / 0.3f;
                     if (textFadeFactor > 1.f) textFadeFactor = 1.f;
                     uint8_t textAlpha = static_cast<uint8_t>(255 * textFadeFactor);
 
                     // 1. 名字：剩余高度 >2% 时渲染（连续判定，无帧率依赖）
                     if (currentHeightPercent > 0.02f) {
-                        uiText.setCharacterSize(14);
+                        uiText.setCharacterSize(28);
                         uiText.setFillColor(sf::Color(255, 255, 255, textAlpha));
                         uiText.setString(currentCard.name);
-                        uiText.setPosition({cardPos.x - 26.f, cardPos.y - 82.f});
+                        uiText.setPosition({cardPos.x - 52.f, cardPos.y - 164.f});
                         window.draw(uiText);
                     }
 
                     // 2. 描述文字：剩余高度 >40% 时渲染
                     if (currentHeightPercent > 0.40f) {
-                        uiText.setCharacterSize(11);
+                        uiText.setCharacterSize(22);
                         uiText.setFillColor(sf::Color(230, 230, 230, textAlpha));
                         uiText.setString(currentCard.description);
-                        uiText.setPosition({cardPos.x - 44.f, cardPos.y - 45.f});
+                        uiText.setPosition({cardPos.x - 88.f, cardPos.y - 90.f});
                         window.draw(uiText);
                     }
 
                     uiText.setFont(font); // 恢复主系统字体
                 }
-                }
+                } // end if (isReturningHandToDeck) else
             } // 顶卡状态机作用域结束
         }
+    }
     }
 
     // ============================================================================
@@ -1674,18 +1831,18 @@ void GameEngine::renderGameplay() {
     // ============================================================================
     if (showcaseState != CardShowcaseState::NONE && newCardSprite != nullptr) {
         float t = showcaseClock.getElapsedTime().asSeconds();
-        sf::Vector2f centerPos(640.f, 360.f);
+        sf::Vector2f centerPos(1280.f, 720.f);
         sf::Vector2u texSize = newCardTexture.getSize();
-        const float TARGET_SCALE = 0.38f;
-        const float START_SCALE  = 0.05f;
-        const float NORMAL_SCALE = 0.18f;              // 卡槽正常缩放
+        const float TARGET_SCALE = 0.76f;
+        const float START_SCALE  = 0.10f;
+        const float NORMAL_SCALE = 0.36f;              // 卡槽正常缩放
         const float SCALE_RATIO  = TARGET_SCALE / NORMAL_SCALE;  // ≈ 2.111
-        const int   NAME_FONT    = static_cast<int>(14 * SCALE_RATIO);  // ≈ 30
-        const int   DESC_FONT    = static_cast<int>(11 * SCALE_RATIO);  // ≈ 23
-        const float NAME_OFF_X   = 26.f * SCALE_RATIO;  // ≈ 55
-        const float NAME_OFF_Y   = 82.f * SCALE_RATIO;  // ≈ 173
-        const float DESC_OFF_X   = 44.f * SCALE_RATIO;  // ≈ 93
-        const float DESC_OFF_Y   = 45.f * SCALE_RATIO;  // ≈ 95
+        const int   NAME_FONT    = static_cast<int>(28 * SCALE_RATIO);  // ≈ 59
+        const int   DESC_FONT    = static_cast<int>(22 * SCALE_RATIO);  // ≈ 46
+        const float NAME_OFF_X   = 52.f * SCALE_RATIO;  // ≈ 110
+        const float NAME_OFF_Y   = 164.f * SCALE_RATIO;  // ≈ 346
+        const float DESC_OFF_X   = 88.f * SCALE_RATIO;  // ≈ 186
+        const float DESC_OFF_Y   = 90.f * SCALE_RATIO;  // ≈ 190
 
         switch (showcaseState) {
 
@@ -1820,18 +1977,21 @@ void GameEngine::renderGameplay() {
                 uiText.setFont(font);
 
                 if (t >= 0.4f) {
-                    // ▶️ 恢复回合计时 + 解锁玩家操作
-                    if (isTurnPaused) {
-                        turnTimePaused += pauseClock.getElapsedTime().asSeconds();
-                        isTurnPaused = false;
-                    }
                     std::cout << "[Showcase] 消退完成，正式触发卡牌效果 —— "
                               << showcasedCard.name.c_str() << std::endl;
-                    if (applyCardEffect(showcasedCard)) {
+                    bool immediate = applyCardEffect(showcasedCard);
+                    if (immediate) {
+                        // 即时效果：恢复计时、消耗AP、结算、解锁
+                        if (isTurnPaused) {
+                            turnTimePaused += pauseClock.getElapsedTime().asSeconds();
+                            isTurnPaused = false;
+                        }
                         consumeActionPoint(false);
                         settleActionPoints();
+                        isBusyAnimating = false;
                     }
-                    isBusyAnimating = false;
+                    // 延迟效果（破釜沉舟/笼络）：保持 isTurnPaused 和 isBusyAnimating，
+                    // 由各自的 deferred completion handler 负责解锁和结算
                     showcaseState = CardShowcaseState::NONE;
                 }
                 break;
@@ -1906,7 +2066,7 @@ void GameEngine::renderGameOver() {
     btnReset.setFillColor(sf::Color(200, 50, 50));
     window.draw(btnReset);
 
-    uiText.setCharacterSize(18);
+    uiText.setCharacterSize(36);
     uiText.setFillColor(sf::Color::White);
     uiText.setString(sf::String(L"回到主菜单"));
     sf::FloatRect resetBounds = uiText.getLocalBounds();
@@ -1932,7 +2092,7 @@ void GameEngine::renderSettings() {
     btn1.setFillColor(sf::Color(218, 171, 118));
     window.draw(btn1);
 
-    uiText.setCharacterSize(18);
+    uiText.setCharacterSize(36);
     uiText.setFillColor(sf::Color(60, 40, 20));
     std::wstring modeText = isProfessionalMode ? L"专业模式：开启" : L"专业模式：关闭";
     uiText.setString(sf::String(modeText));
@@ -1954,7 +2114,7 @@ void GameEngine::renderSettings() {
 }
 
 void GameEngine::renderInfo() {
-    uiText.setCharacterSize(32);
+    uiText.setCharacterSize(48);
     uiText.setFillColor(sf::Color(100, 60, 30));
 
     std::wstring infoTitle = (currentState == GameState::HELP) ? L"游戏规则" : L"历史记录";
@@ -1962,7 +2122,7 @@ void GameEngine::renderInfo() {
     uiText.setPosition({220.f, 50.f});
     window.draw(uiText);
 
-    uiText.setCharacterSize(16);
+    uiText.setCharacterSize(32);
     uiText.setFillColor(sf::Color(60, 40, 20));
 
     if (currentState == GameState::HELP) {
@@ -2010,7 +2170,7 @@ void GameEngine::renderInfo() {
         // 将 std::string 转为 wstring 简单方式（仅用于 ASCII 文件名）
         nameW.assign(fn.begin(), fn.end());
 
-        sf::Text fnText(font, nameW, 16);
+        sf::Text fnText(font, nameW, 32);
         fnText.setFillColor(sf::Color(60,40,20));
         fnText.setPosition({startX + 10.f, startY + idx * lineH + 8.f});
         window.draw(fnText);
@@ -2172,6 +2332,34 @@ void GameEngine::settleActionPoints() {
 }
 
 // 6. 卡牌效果分发器：湮灭完成后由 GameEngine 统一调度
+// 🌟 破釜沉舟销毁阶段：退牌动画完成后，随机销毁敌方棋子
+void GameEngine::executeSacrificeDestroy(int destroyCount) {
+    int enemy = (currentTurn == 1) ? 2 : 1;
+    std::vector<std::pair<int,int>> enemyPieces;
+    for (int r = 0; r < 15; ++r)
+        for (int c = 0; c < 15; ++c)
+            if (chessboard.getPiece(r, c) == enemy)
+                enemyPieces.push_back({r, c});
+    // 随机打乱
+    for (size_t k = 0; k < enemyPieces.size(); ++k) {
+        int sw = rand() % enemyPieces.size();
+        std::swap(enemyPieces[k], enemyPieces[sw]);
+    }
+    int actual = std::min(destroyCount, (int)enemyPieces.size());
+    pendingDestroys.clear();
+    for (int k = 0; k < actual; ++k)
+        pendingDestroys.push_back(enemyPieces[k]);
+    isBulkDestroying = !pendingDestroys.empty();
+    if (isBulkDestroying) {
+        auto& p = pendingDestroys.back();
+        chessboard.startDestroyAnim(p.first, p.second);
+        isBusyAnimating = true;
+        std::cout << "[CardEffect] 破釜沉舟销毁阶段：销毁" << actual << "颗敌方棋子。" << std::endl;
+    } else {
+        isBusyAnimating = false;
+    }
+}
+
 bool GameEngine::applyCardEffect(const Card& card) {
     std::cout << "[CardEffect] 触发卡牌效果 —— ID:" << card.id
               << " 名称:" << card.name.c_str()
@@ -2197,42 +2385,20 @@ bool GameEngine::applyCardEffect(const Card& card) {
             std::cout << "[CardEffect] 笼络发动！请先选择己方棋子销毁。" << std::endl;
             return false;
         case CardEffect::SACRIFICE_HAND: {
-            int otherCards = std::max(0, (int)playerDeck.hand.size() - 1); // 不计自身
+            // 破釜沉舟自身已在湮灭时进弃牌堆、从手牌移除
+            int otherCards = (int)playerDeck.hand.size();
             int destroyCount = (otherCards >= 3) ? 5 : (otherCards == 2 ? 3 : (otherCards == 1 ? 2 : 1));
-            // 只回其他手牌到牌库，自身保留（后续进弃牌堆）
-            for (size_t i = 0; i < playerDeck.hand.size(); ++i) {
-                if (static_cast<int>(i) != attachedCardIndex)
-                    playerDeck.deck.push_back(playerDeck.hand[i]);
-            }
-            // 仅保留破釜沉舟自身
-            Card selfCard = playerDeck.hand[attachedCardIndex];
-            int  selfSlot = handSlotAssign[attachedCardIndex];
-            playerDeck.hand.clear();
-            handSlotAssign.clear();
-            playerDeck.hand.push_back(selfCard);
-            handSlotAssign.push_back(selfSlot);
-            attachedCardIndex = 0;
-            int enemy = (currentTurn == 1) ? 2 : 1;
-            std::vector<std::pair<int,int>> enemyPieces;
-            for (int r = 0; r < 15; ++r)
-                for (int c = 0; c < 15; ++c)
-                    if (chessboard.getPiece(r, c) == enemy)
-                        enemyPieces.push_back({r, c});
-            for (size_t k = 0; k < enemyPieces.size(); ++k) {
-                int sw = rand() % enemyPieces.size();
-                std::swap(enemyPieces[k], enemyPieces[sw]);
-            }
-            int actual = std::min(destroyCount, (int)enemyPieces.size());
-            pendingDestroys.clear();
-            for (int k = 0; k < actual; ++k)
-                pendingDestroys.push_back(enemyPieces[k]);
-            isBulkDestroying = !pendingDestroys.empty();
-            if (isBulkDestroying) {
-                auto& p = pendingDestroys.back();
-                chessboard.startDestroyAnim(p.first, p.second);
+            if (otherCards > 0) {
+                // 🌟 启动退牌动画（所有手牌同时走出生动画反向，1秒）
+                isReturningHandToDeck = true;
+                returnHandToDeckClock.restart();
+                pendingSacrificeDestroys = destroyCount;
                 isBusyAnimating = true;
-                std::cout << "[CardEffect] 破釜沉舟！回手" << otherCards
-                          << "张，销毁" << actual << "颗敌方棋子。" << std::endl;
+                std::cout << "[CardEffect] 破釜沉舟！退牌动画启动，" << otherCards
+                          << "张手牌返还牌库，将销毁" << destroyCount << "颗敌方棋子。" << std::endl;
+            } else {
+                // 无其他手牌，直接进入销毁阶段
+                executeSacrificeDestroy(destroyCount);
             }
             return false;
         }
@@ -2264,9 +2430,7 @@ void GameEngine::triggerBattleMusic02() {
     if (battleMusicState == BattleMusicState::NORMAL) {
         battleMusicState = BattleMusicState::SWITCHING_TO_02;
         crossfadeClock.restart();
-        battleMusic02.setVolume(0.f);
-        if (static_cast<int>(battleMusic02.getStatus()) != 2) battleMusic02.play();
-        std::cout << "[Audio] CardReader 检测 —— 切换到 BATTLE_02" << std::endl;
+        std::cout << "[Audio] CardReader 检测 —— 开始串行过渡到 BATTLE_02" << std::endl;
     }
 }
 
