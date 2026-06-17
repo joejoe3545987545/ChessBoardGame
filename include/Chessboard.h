@@ -28,7 +28,7 @@ public:
     bool checkWin(int row, int col);
     void setWinCondition(int player, int cond);  // 设置某方胜利条件（默认 5）
     int  getWinCondition(int player) const;
-    void draw(sf::RenderWindow& window);
+    void draw(sf::RenderTarget& target);
 
     // 将棋盘网格坐标转换为像素坐标（外部也可用）
     void getGridPosition(int row, int col, float& outX, float& outY) const;
@@ -55,6 +55,7 @@ public:
     void stopReplay();
     bool isReplaying() const;
     void drawHoverRing(sf::RenderWindow& window, int currentTurn);
+    void placeDirect(int row, int col, int player);
 
     // 棋子动画（销毁/转化，可复用）
     void startDestroyAnim(int row, int col);
@@ -90,7 +91,7 @@ private:
     void findWinLine(int row, int col);
 
     // 在 draw() 中调用，用于绘制胜利连线上每个棋子的高亮
-    void drawWinLineHighlight(sf::RenderWindow& window, int startRow, int startCol, int endRow, int endCol);
+    void drawWinLineHighlight(sf::RenderTarget& target, int startRow, int startCol, int endRow, int endCol);
 
     // ================= 历史数据 =================
     std::vector<Move> moveHistory;
@@ -99,9 +100,6 @@ private:
     std::vector<Move> replayMoves;
     size_t replayIndex = 0;
     bool replaying = false;
-
-    // 内部直接放置棋子到网格（不记录 moveHistory，不触发外部回调）
-    void placeDirect(int row, int col, int player);
     sf::Vector2i hoverGridPos = sf::Vector2i(-1, -1);
 
     // 棋子动画状态

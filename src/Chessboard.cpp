@@ -376,7 +376,7 @@ void Chessboard::clearWinLine() {
 // ============================================================================
 // 绘制棋盘
 // ============================================================================
-void Chessboard::draw(sf::RenderWindow& window) {
+void Chessboard::draw(sf::RenderTarget& target) {
     // 1. 🌟 棋盘底图（中心原点，方便缩放校准）
     sf::Vector2u boardTextureSize = boardTexture.getSize();
     if (boardTextureSize.x > 0 && boardTextureSize.y > 0) {
@@ -389,7 +389,7 @@ void Chessboard::draw(sf::RenderWindow& window) {
     float boardCenterX = START_X + GRID_SPAN * 0.5f + 0.0f;
     float boardCenterY = START_Y + GRID_SPAN * 0.5f + 14.f;
     boardSprite.setPosition({boardCenterX, boardCenterY});
-    window.draw(boardSprite);
+    target.draw(boardSprite);
 
     // 2. 棋子渲染（含动画效果）
     for (int i = 0; i < 15; ++i) {
@@ -419,7 +419,7 @@ void Chessboard::draw(sf::RenderWindow& window) {
                 int ch = (int)(ts.y * clipHeight);
                 sp.setTextureRect(sf::IntRect({0, 0}, {(int)ts.x, ch}));
                 sp.setColor(sf::Color(255, 255, 255, alpha));
-                window.draw(sp);
+                target.draw(sp);
                 sp.setTextureRect(sf::IntRect({0, 0}, {(int)ts.x, (int)ts.y}));
                 sp.setColor(sf::Color(255, 255, 255, 255)); // 恢复
             };
@@ -459,7 +459,7 @@ void Chessboard::draw(sf::RenderWindow& window) {
         winLine.append(sf::Vertex{ .position = {startX, startY}, .color = winLineColor });
         winLine.append(sf::Vertex{ .position = {endX, endY},     .color = winLineColor });
 
-        window.draw(winLine);
+        target.draw(winLine);
 
         // 绘制更粗的线条效果（通过绘制多条线）
         sf::VertexArray winLineThick(sf::PrimitiveType::Lines);
@@ -472,17 +472,17 @@ void Chessboard::draw(sf::RenderWindow& window) {
         winLineThick.append(sf::Vertex{ .position = {startX + offsetX, startY - offsetY}, .color = sf::Color(255, 215, 0, 180) });
         winLineThick.append(sf::Vertex{ .position = {endX + offsetX, endY - offsetY},     .color = sf::Color(255, 215, 0, 180) });
 
-        window.draw(winLineThick);
+        target.draw(winLineThick);
 
         // 在五个连线棋子上绘制圆形高亮
-        drawWinLineHighlight(window, winStartRow, winStartCol, winEndRow, winEndCol);
+        drawWinLineHighlight(target, winStartRow, winStartCol, winEndRow, winEndCol);
     }
 }
 
 // ============================================================================
 // 🌟 【辅助】绘制胜利线上的棋子高亮
 // ============================================================================
-void Chessboard::drawWinLineHighlight(sf::RenderWindow& window, int startRow, int startCol, int endRow, int endCol) {
+void Chessboard::drawWinLineHighlight(sf::RenderTarget& target, int startRow, int startCol, int endRow, int endCol) {
     // 计算方向向量
     int dr = (endRow > startRow) ? 1 : (endRow < startRow) ? -1 : 0;
     int dc = (endCol > startCol) ? 1 : (endCol < startCol) ? -1 : 0;
@@ -501,7 +501,7 @@ void Chessboard::drawWinLineHighlight(sf::RenderWindow& window, int startRow, in
         highlight.setOutlineColor(sf::Color(255, 215, 0, 200));  // 金黄色边框
         highlight.setOutlineThickness(6.f);
 
-        window.draw(highlight);
+        target.draw(highlight);
 
         // 移动到下一个棋子
         r += dr;

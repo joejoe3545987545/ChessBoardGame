@@ -268,6 +268,20 @@ GameEngine::GameEngine()
         menuBlackSpr.setOrigin({menuBlackTex.getSize().x / 2.f, menuBlackTex.getSize().y / 2.f});
     }
 
+    // 🌟 主菜单 UI 素材
+    if (uiFrameTex.loadFromFile(getEngineAssetPath("assets/UI_Frame.png"))) {
+        uiFrameSpr.setTexture(uiFrameTex, true);
+        uiFrameSpr.setOrigin({uiFrameTex.getSize().x / 2.f, uiFrameTex.getSize().y / 2.f});
+    }
+    if (mainTitleTex.loadFromFile(getEngineAssetPath("assets/MainTittle.png"))) {
+        mainTitleSpr.setTexture(mainTitleTex, true);
+        mainTitleSpr.setOrigin({mainTitleTex.getSize().x / 2.f, mainTitleTex.getSize().y / 2.f});
+    }
+    // 🌟 画中画初始化
+    pipRT.resize({1280u, 720u});
+    pipSpr = new sf::Sprite(pipRT.getTexture());
+    pipAnimStart(1);  // 启动动画 1
+
     std::cout << "[Info] GameEngine constructed." << std::endl;
 }
 
@@ -308,28 +322,34 @@ void GameEngine::initUI() {
 }
 
     std::vector<std::wstring> menuTexts = {
-        L"本地双人对战", L"人机对战", L"游戏设置", L"规则说明帮助", L"历史记录复盘"
+        L"本地双人对战", L"人机对战", L"游戏设置", L"规则说明帮助", L"历史记录复盘", L"退出游戏"
     };
 
-    // 菜单按钮：宽度240，高度50，居中显示
+    // 菜单按钮视觉尺寸 vs 红框检测尺寸
     const float menuButtonWidth = 320.f;
     const float menuButtonHeight = 67.f;
+    const float hitWidth  = menuButtonWidth * 1.1f;    // 检测横 ×1.1
+    const float hitHeight = menuButtonHeight * 1.8f;   // 检测纵 ×1.8
     const float centerX = WINDOW_WIDTH * 0.5f;
-    const float menuStartY = 293.f;
+    const float menuStartY = 543.f;
     const float menuButtonX = centerX - menuButtonWidth * 0.5f;
+    const float hitX = centerX - hitWidth * 0.5f;
 
     for (size_t i = 0; i < menuTexts.size(); ++i) {
-        sf::RectangleShape bg({menuButtonWidth, menuButtonHeight});
-        bg.setPosition({menuButtonX, menuStartY + i * 107.f});
-        bg.setFillColor(sf::Color(212, 163, 107));
+        float extraGap = static_cast<float>(i) * 30.f;   // 往下逐级多隔 30px
+        float btnY = menuStartY + i * 107.f + extraGap;
+        // 红色校准框=检测范围
+        sf::RectangleShape bg({hitWidth, hitHeight});
+        bg.setPosition({hitX, btnY - (hitHeight - menuButtonHeight) * 0.5f});
+        bg.setFillColor(sf::Color(0, 0, 0, 0));  // 透明（仅用于定位）
         menuButtonBackgrounds.push_back(bg);
 
-        sf::Text t(font, menuTexts[i], 40);
-        t.setFillColor(sf::Color(45, 45, 45));
+        sf::Text t(cardFont, menuTexts[i], 48);
+        t.setFillColor(sf::Color(50, 15, 70));
         sf::FloatRect textBounds = t.getLocalBounds();
         t.setPosition(sf::Vector2f(
             centerX - (textBounds.position.x + textBounds.size.x) * 0.5f,
-            menuStartY + i * 107.f + (menuButtonHeight - textBounds.size.y) * 0.5f - textBounds.position.y));
+            btnY + (menuButtonHeight - textBounds.size.y) * 0.5f - textBounds.position.y));
         menuButtons.push_back(t);
     }
 
@@ -348,6 +368,24 @@ void GameEngine::initUI() {
     }
 }
 
+
+// ── PIP 动画循环系统 ──
+static constexpr int PIP_ANIM_COUNT = 2;  // 当前动画总数
+
+void GameEngine::pipAnimNext() {
+    pipAnimIndex++;
+    if (pipAnimIndex > PIP_ANIM_COUNT) pipAnimIndex = 1;
+    pipAnimStart(pipAnimIndex);
+}
+
+void GameEngine::pipAnimStart(int animIdx) {
+    pipAnimIndex = animIdx;
+    pipAnimState = 0;
+    pipAnimClock.restart();
+    pipFadeAlpha = 0.f;
+    pipFadeClock.restart();
+    pipTotalDur = (animIdx == 1) ? 7.f : 10.f;  // 默认每个动画的时长
+}
 
 // 全屏切换
 void GameEngine::toggleFullscreen() {
@@ -567,14 +605,26 @@ void GameEngine::processEvents() {
 }
 
 void GameEngine::handleMenuClick(sf::Vector2i mousePos) {
-    const float menuButtonWidth = 320.f;
-    const float centerX = WINDOW_WIDTH * 0.5f;
-    const float menuButtonX = centerX - menuButtonWidth * 0.5f;
-    const float menuButtonRightX = centerX + menuButtonWidth * 0.5f;
-    const float menuStartY = 293.f;
+    // ── 乱码卡片点击优先：卡片在最上层，遮挡按钮时卡片优先 ──
+    {
+        float gcx = glitchCardPos.x, gcy = glitchCardPos.y;
+        float dx = mousePos.x - gcx, dy = mousePos.y - gcy;
+        const float cardHalfDiag = 300.f;  // 卡片半对角线 ≈ sqrt(173²+240²) ≈ 296
+        if (dx * dx + dy * dy < cardHalfDiag * cardHalfDiag) {
+            return;  // 点击在卡片上，不触发按钮
+        }
+    }
 
-    if (mousePos.x > menuButtonX && mousePos.x < menuButtonRightX) {
-        if (mousePos.y > menuStartY && mousePos.y < menuStartY + 67.f) {
+    const float visualWidth = 320.f;
+    const float centerX = WINDOW_WIDTH * 0.5f;
+    const float hitWidth = visualWidth * 1.1f;   // 横向 ×1.1
+    const float hitHeight = 67.f * 1.8f;          // 纵向 ×1.8
+    const float hitX = centerX - hitWidth * 0.5f;
+    const float hitRX = centerX + hitWidth * 0.5f;
+    const float menuStartY = 543.f;
+
+    if (mousePos.x > hitX && mousePos.x < hitRX) {
+        if (mousePos.y > menuStartY && mousePos.y < menuStartY + hitHeight) {
             chessboard.reset();
             playerDeck.resetDeck();
             handSlotAssign.clear();
@@ -602,17 +652,20 @@ void GameEngine::handleMenuClick(sf::Vector2i mousePos) {
             initActionPointsForTurn();
             turnClock.restart();
         }
-        else if (mousePos.y > menuStartY + 107.f && mousePos.y < menuStartY + 174.f) {
+        else if (mousePos.y > menuStartY + 137.f && mousePos.y < menuStartY + 137.f + hitHeight) {
             currentState = GameState::PVE_CONFIG;
         }
-        else if (mousePos.y > menuStartY + 214.f && mousePos.y < menuStartY + 281.f) {
+        else if (mousePos.y > menuStartY + 274.f && mousePos.y < menuStartY + 274.f + hitHeight) {
             currentState = GameState::SETTINGS;
         }
-        else if (mousePos.y > menuStartY + 321.f && mousePos.y < menuStartY + 388.f) {
+        else if (mousePos.y > menuStartY + 411.f && mousePos.y < menuStartY + 411.f + hitHeight) {
             currentState = GameState::HELP;
         }
-        else if (mousePos.y > menuStartY + 428.f && mousePos.y < menuStartY + 495.f) {
+        else if (mousePos.y > menuStartY + 548.f && mousePos.y < menuStartY + 548.f + hitHeight) {
             currentState = GameState::HISTORY;
+        }
+        else if (mousePos.y > menuStartY + 685.f && mousePos.y < menuStartY + 685.f + hitHeight) {
+            window.close();
         }
     }
 }
@@ -945,6 +998,65 @@ void GameEngine::handleHistoryClick(sf::Vector2i mousePos) {
 }
 
 void GameEngine::update() {
+    // 🌟 画中画淡入淡出（首1s淡入，末0.5s淡出）
+    {
+        float ft = pipFadeClock.getElapsedTime().asSeconds();
+        if (ft < 1.f)          pipFadeAlpha = ft;               // 淡入
+        else if (pipTotalDur - ft < 1.f) pipFadeAlpha = (pipTotalDur - ft) / 1.f;  // 淡出
+        else                   pipFadeAlpha = 1.f;               // 全显
+    }
+
+    // 🌟 PIP 边界反弹淡出/淡入
+    {
+        float bt = pipBounceClock.getElapsedTime().asSeconds();
+        switch (pipBounce) {
+        case BOUNCE_OUT:
+            pipBounceAlpha = 1.f - bt / 0.5f; if (pipBounceAlpha < 0.f) pipBounceAlpha = 0.f;
+            if (bt >= 0.5f) { pipBounce = BOUNCE_HIDE; pipBounceClock.restart(); }
+            break;
+        case BOUNCE_HIDE:
+            pipBounceAlpha = 0.f;
+            if (bt >= 2.f) { pipBounce = BOUNCE_IN; pipBounceClock.restart(); }
+            break;
+        case BOUNCE_IN:
+            pipBounceAlpha = bt / 0.5f; if (pipBounceAlpha > 1.f) pipBounceAlpha = 1.f;
+            if (bt >= 0.5f) { pipBounce = BOUNCE_NONE; pipBounceAlpha = 1.f; }
+            break;
+        default: break;
+        }
+    }
+
+    // 🌟 画中画匀速往返 (320↔2240, 50px/s)
+    {
+        const float SPEED = 50.f;
+        const float LEFT = 320.f, RIGHT = 2240.f;
+        float range = RIGHT - LEFT;
+        float period = 2.f * range / SPEED;
+        float t = fmodf(pipClock.getElapsedTime().asSeconds(), period);
+        float prevX = pipPos.x;
+        pipPos.x = (t < period / 2.f)
+            ? LEFT  + SPEED * t
+            : RIGHT - SPEED * (t - period / 2.f);
+        pipPos.y = 540.f;
+        // 检测到达边界
+        if (pipBounce == BOUNCE_NONE) {
+            float margin = 3.f;
+            if ((prevX > LEFT + margin && pipPos.x <= LEFT + margin) ||
+                (prevX < LEFT + margin && pipPos.x >= LEFT + margin && prevX > 0)) {
+                // 到达左边界
+            }
+            if ((prevX < RIGHT - margin && pipPos.x >= RIGHT - margin) ||
+                (prevX > RIGHT - margin && pipPos.x <= RIGHT - margin && prevX > LEFT)) {
+                // 到达右边界
+            }
+            // 简化：距离边界 < 2px 时触发
+            if (pipPos.x <= LEFT + 2.f || pipPos.x >= RIGHT - 2.f) {
+                pipBounce = BOUNCE_OUT;
+                pipBounceClock.restart();
+            }
+        }
+    }
+
     // 🌟【全状态音频状态机】：完美互斥控制所有 5 首 BGM 的播放
 
     if (currentState == GameState::MENU) {
@@ -1320,10 +1432,20 @@ void GameEngine::render() {
 }
 
 void GameEngine::renderMenu() {
-    // ── 第 0 层：灰色背景底 ──
-    sf::RectangleShape menuBG({2560.f, 1440.f});
-    menuBG.setFillColor(sf::Color(60, 60, 65));
-    window.draw(menuBG);
+    // ── 第 0 层：星空帧动画背景（25fps, 播完循环）──
+    float bgElapsed = bgFrameClock.getElapsedTime().asSeconds();
+    int frame = static_cast<int>(bgElapsed * 25.f) % BG_TOTAL_FRAMES + 1;
+    char path[128]; snprintf(path, sizeof(path),
+        "assets/Universe/frame_%05d.jpg", frame);
+    if (bgTexA.loadFromFile(getEngineAssetPath(path))) {
+        bgSprA.setTexture(bgTexA, true);
+        float sw = 2560.f / bgTexA.getSize().x;
+        float sh = 1440.f / bgTexA.getSize().y;
+        bgSprA.setScale({sw, sh});
+        bgSprA.setPosition({0.f, 0.f});
+        bgSprA.setColor(sf::Color(255, 255, 255, 255));
+        window.draw(bgSprA);
+    }
 
     // ── 抛物线动画计算 ──
     const float DURATION = 30.f;  // 单程 30 秒
@@ -1351,24 +1473,413 @@ void GameEngine::renderMenu() {
     menuWhiteSpr.setRotation(sf::degrees(rotAngle));       // 顺时针
     window.draw(menuWhiteSpr);
 
-    // ── 第 2 层：黑子 ──
+    // ── 第 2 层：画中画 (PIP) ──
+    pipRT.clear(sf::Color::Transparent);
+    pipRT.setView(pipView);
+
+    float dt = pipAnimClock.getElapsedTime().asSeconds();
+
+    // ── 动画 1：读卡器 + 卡牌 ──
+    if (pipAnimIndex == 1 && cardReaderBottomSprite && cardReaderTopSprite) {
+        float rs = 0.35f;  // 读卡器在 PIP 中的缩放
+        cardReaderBottomSprite->setScale({rs, rs});
+        cardReaderBottomSprite->setPosition({640.f, 100.f});
+        pipRT.draw(*cardReaderBottomSprite);
+        cardReaderBottomSprite->setScale({0.8f, 0.8f});  // 恢复
+        cardReaderBottomSprite->setPosition({300.f, 210.f}); // 恢复
+
+        // ── 第 2 层：卡牌动画 ──
+        float cs = rs * 0.45f;
+        float cardX = 640.f, cardY = 360.f;
+        float cardScale = cs;
+        uint8_t cardAlpha = 255;
+        bool showCard = true;
+        bool showReader = true;
+
+        // ──── 动画 1：连击读卡演示 ────
+        if (pipAnimIndex == 1) {
+            switch (pipAnimState) {
+            case 0: { // MOVE_DOWN (2s)
+                float targetY = 200.f, startY = 360.f, dur = 2.f;
+                float t = (dt < dur) ? dt / dur : 1.f;
+                t = t * t * (3.f - 2.f * t);
+                cardY = startY + (targetY - startY) * t;
+                if (dt >= dur + 0.2f) { pipAnimState = 1; pipAnimClock.restart(); }
+                break;
+            }
+            case 1: // INSERT
+                cardY = 200.f + (100.f - 200.f) * (dt / 0.7f);
+                if (dt >= 0.7f) { pipAnimState = 2; pipAnimClock.restart(); }
+                break;
+            case 2: { // ANNIHILATE
+                float t = dt / 0.4f; if (t > 1.f) t = 1.f;
+                cardY = 100.f;
+                cardScale = cs * (1.f - t);
+                cardAlpha = (uint8_t)(255 * (1.f - t));
+                if (dt >= 0.4f) { pipAnimState = 3; pipAnimClock.restart(); showCard = false; }
+                break;
+            }
+            case 3: // SHOW_PAUSE
+                showCard = false;
+                if (dt >= 0.3f) { pipAnimState = 4; pipAnimClock.restart(); }
+                break;
+            case 4: { // SHOW_APPEAR
+                float t = dt / 1.2f; if (t > 1.f) t = 1.f;
+                float et = 1.f - (1.f - t) * (1.f - t) * (1.f - t);
+                float sc = cs * 0.1f + (cs * 2.5f - cs * 0.1f) * et;
+                cardScale = sc;
+                cardX = 640.f; cardY = 450.f;
+            float whiteP = 1.f - t;  // 白光消退
+            sf::Vector2u ct2 = newCardTexture.getSize();
+            newCardSprite->setScale({sc, sc});
+            newCardSprite->setPosition({640.f, 450.f});
+            float clipH = ct2.y * et;
+            newCardSprite->setTextureRect(sf::IntRect({0, 0}, {(int)ct2.x, (int)clipH}));
+            newCardSprite->setColor(sf::Color(255,255,255,cardAlpha));
+            pipRT.draw(*newCardSprite);
+            uint8_t w = (uint8_t)(255 * whiteP);
+            newCardSprite->setColor(sf::Color(w,w,w,255));
+            pipRT.draw(*newCardSprite, sf::BlendAdd);
+            uiText.setFont(cardFont);
+            uiText.setCharacterSize((int)(36.f * sc / 0.36f));
+            uiText.setFillColor(sf::Color(255,255,255,cardAlpha));
+            uiText.setString(L"连击");
+            uiText.setPosition({640.f - 52.f * sc / 0.36f, 450.f - 164.f * sc / 0.36f});
+            pipRT.draw(uiText);
+            uiText.setCharacterSize((int)(27.f * sc / 0.36f));
+            uiText.setFillColor(sf::Color(230,230,230,cardAlpha));
+            uiText.setString(L"给予两次落子数");
+            uiText.setPosition({640.f - 88.f * sc / 0.36f, 450.f - 90.f * sc / 0.36f});
+            pipRT.draw(uiText);
+            uiText.setFont(font);
+            showCard = false;
+            if (dt >= 1.2f) { pipAnimState = 5; pipAnimClock.restart(); }
+                break;
+            }
+            case 5: // SHOW_DISPLAY
+                cardX = 640.f; cardY = 450.f; cardScale = cs * 2.5f;
+                if (dt >= 1.f) { pipAnimState = 6; pipAnimClock.restart(); }
+                break;
+            case 6: { // SHOW_FADE（纯透明度淡化）
+                float t = dt / 0.5f; if (t > 1.f) t = 1.f;
+                cardX = 640.f; cardY = 450.f; cardScale = cs * 2.5f;
+            cardAlpha = (uint8_t)(255 * (1.f - t));
+            if (dt >= 0.5f) { pipAnimNext(); }  // → 下一个动画
+                break;
+            }
+            }
+        }  // end anim 1
+
+        // 绘制卡牌（非特殊绘制的状态）
+        if (showCard && cardAlpha > 0) {
+            sf::Vector2u ct2 = newCardTexture.getSize();
+            newCardSprite->setScale({cardScale, cardScale});
+            newCardSprite->setPosition({cardX, cardY});
+            newCardSprite->setTextureRect(sf::IntRect({0,0}, {(int)ct2.x, (int)ct2.y}));
+            newCardSprite->setColor(sf::Color(255,255,255,cardAlpha));
+            pipRT.draw(*newCardSprite);
+            // 文字
+            uiText.setFont(cardFont);
+            uiText.setCharacterSize((int)(36.f * cardScale / 0.36f));
+            uiText.setFillColor(sf::Color(255,255,255,cardAlpha));
+            uiText.setString(L"连击");
+            uiText.setPosition({cardX - 52.f * cardScale / 0.36f, cardY - 164.f * cardScale / 0.36f});
+            pipRT.draw(uiText);
+            uiText.setCharacterSize((int)(27.f * cardScale / 0.36f));
+            uiText.setFillColor(sf::Color(230,230,230,cardAlpha));
+            uiText.setString(L"给予两次落子数");
+            uiText.setPosition({cardX - 88.f * cardScale / 0.36f, cardY - 90.f * cardScale / 0.36f});
+            pipRT.draw(uiText);
+            uiText.setFont(font);
+        }
+        newCardSprite->setScale({0.36f, 0.36f});
+
+        // ── 第 3 层：CardReader Top ──
+        if (showReader) {
+            cardReaderTopSprite->setScale({rs, rs});
+            cardReaderTopSprite->setPosition({640.f, 100.f});
+            pipRT.draw(*cardReaderTopSprite);
+            cardReaderTopSprite->setScale({0.8f, 0.8f});
+            cardReaderTopSprite->setPosition({300.f, 210.f});
+        }
+    }
+    // ──── 动画 2：棋盘下棋演示 ────
+    else if (pipAnimIndex == 2) {
+        pipTotalDur = 10.f;
+        // 预定义走法序列（黑1白2，黑先）
+        struct Move { float t; int r; int c; int p; };
+        static const Move moves[] = {
+            {0.0f, 7,7,1},  {1.0f, 7,8,2}, {2.0f, 7,6,1},
+            {3.0f, 8,7,2},  {4.0f, 7,5,1},  // 黑三连 (7,5-7,6-7,7)
+        };
+        const int moveCount = 5;
+
+        // 状态 0：清空棋盘
+        if (pipAnimState == 0) {
+            chessboard.reset();
+            pipAnimState = 1;
+        }
+        // 逐步落子
+        if (pipAnimState >= 1 && pipAnimState <= moveCount) {
+            int idx = pipAnimState - 1;
+            if (dt >= moves[idx].t) {
+                chessboard.placeDirect(moves[idx].r, moves[idx].c, moves[idx].p);
+                pipAnimState++;
+                // 三连达成后启抽卡动画（moveCount=5已达成）
+                if (pipAnimState > moveCount) pipAnimState = 6;
+            }
+        }
+        // 抽卡出生动画（1.5s，在卡槽1）
+        if (pipAnimState == 6) {
+            float cardGenT = dt - moves[moveCount-1].t;  // 从最后一子落完后计时
+            if (cardGenT < 0.f) cardGenT = 0.f;
+            if (cardGenT > 1.5f) { pipAnimState = 7; }
+        }
+        // 展示到结束
+        if (pipAnimState == 7 && dt >= pipTotalDur) {
+            pipAnimNext();
+        }
+
+        sf::View boardView(sf::FloatRect({300.f, 0.f}, {2560.f, 1440.f}));
+        pipRT.setView(boardView);
+        chessboard.draw(pipRT);
+        // 卡槽
+        if (cardSlotSprite)  pipRT.draw(*cardSlotSprite);
+        if (cardSlotSprite2) pipRT.draw(*cardSlotSprite2);
+        // 抽卡动画 / 卡牌展示
+        if (pipAnimState == 6 || pipAnimState == 7) {
+            float t = dt - moves[moveCount-1].t;
+            if (t < 0.f) t = 0.f;
+            float heightPct = (pipAnimState == 6) ? (t / 1.0f) : 1.f;
+            if (heightPct > 1.f) heightPct = 1.f;
+            float whitePct = (pipAnimState == 6) ? (1.f - t / 1.5f) : 0.f;
+            if (whitePct < 0.f) whitePct = 0.f;
+            sf::Vector2u ct = newCardTexture.getSize();
+            int clipH = (int)(ct.y * heightPct);
+            newCardSprite->setScale({0.36f, 0.36f});
+            newCardSprite->setPosition({2260.f, 321.f});
+            newCardSprite->setTextureRect(sf::IntRect({0,0}, {(int)ct.x, clipH}));
+            newCardSprite->setColor(sf::Color(255,255,255,255));
+            pipRT.draw(*newCardSprite);
+            if (whitePct > 0.f) {
+                uint8_t w = (uint8_t)(255 * whitePct);
+                newCardSprite->setColor(sf::Color(w,w,w,255));
+                pipRT.draw(*newCardSprite, sf::BlendAdd);
+            }
+            // 文字
+            uiText.setFont(cardFont);
+            uiText.setCharacterSize(28);
+            uiText.setFillColor(sf::Color(255,255,255,255));
+            uiText.setString(L"连击");
+            uiText.setPosition({2260.f - 52.f, 321.f - 164.f});
+            pipRT.draw(uiText);
+            uiText.setCharacterSize(22);
+            uiText.setFillColor(sf::Color(230,230,230,255));
+            uiText.setString(L"给予两次落子数");
+            uiText.setPosition({2260.f - 88.f, 321.f - 90.f});
+            pipRT.draw(uiText);
+            uiText.setFont(font);
+        }
+        newCardSprite->setScale({0.36f, 0.36f});
+        pipRT.setView(pipView);
+    }
+    pipRT.display();
+    pipSpr->setTexture(pipRT.getTexture(), true);
+    pipSpr->setOrigin({pipRT.getSize().x / 2.f, pipRT.getSize().y / 2.f});
+    pipSpr->setPosition(pipPos);
+    float combinedAlpha = pipFadeAlpha * pipBounceAlpha * 0.6f;
+    uint8_t fa = static_cast<uint8_t>(255.f * combinedAlpha);
+    pipSpr->setColor(sf::Color(255, 255, 255, fa));
+    window.draw(*pipSpr);
+
+    // ── 第 3 层：黑子 ──
     float bw = static_cast<float>(menuBlackTex.getSize().x);
     float bh = static_cast<float>(menuBlackTex.getSize().y);
     menuBlackSpr.setScale({1013.f / bw, 1003.5f / bh});
     menuBlackSpr.setPosition({bx, by});
-    menuBlackSpr.setRotation(sf::degrees(-rotAngle));      // 逆时针
+    menuBlackSpr.setRotation(sf::degrees(-rotAngle));
     window.draw(menuBlackSpr);
 
     // ── 第 4 层：UI 渲染在最上面 ──
-    uiText.setCharacterSize(72);
-    uiText.setFillColor(sf::Color(220, 200, 160));
-    uiText.setString(sf::String(L"五子棋"));
-    sf::FloatRect titleBounds = uiText.getLocalBounds();
-    uiText.setPosition(sf::Vector2f(WINDOW_WIDTH * 0.5f - titleBounds.size.x * 0.5f, 120.f));
-    window.draw(uiText);
+    float tw = static_cast<float>(mainTitleTex.getSize().x);
+    float th = static_cast<float>(mainTitleTex.getSize().y);
+    float titleScale = 800.f / tw;  // 宽 400×2 等比缩放
+    mainTitleSpr.setScale({titleScale, titleScale});
+    mainTitleSpr.setPosition({WINDOW_WIDTH * 0.5f, 320.f});
+    window.draw(mainTitleSpr);
 
-    for (auto& bg : menuButtonBackgrounds) window.draw(bg);
-    for (auto& btn : menuButtons) window.draw(btn);
+    // UI_Frame 按钮背景图（等比例缩放，悬停放大）
+    float ffw = static_cast<float>(uiFrameTex.getSize().x);
+    float ffh = static_cast<float>(uiFrameTex.getSize().y);
+    float frameScale = 120.6f / ffh;
+    // 检测鼠标悬停
+    sf::Vector2i mp = sf::Mouse::getPosition(window);
+    sf::Vector2f mpos = window.mapPixelToCoords(mp);
+    int hoverIdx = -1;
+    float hw = 320.f * 1.1f;       // 检测区宽度
+    float hh = 67.f * 1.8f;        // 检测区高度
+    for (size_t i = 0; i < menuButtonBackgrounds.size(); ++i) {
+        sf::Vector2f hp = menuButtonBackgrounds[i].getPosition();
+        if (mpos.x > hp.x && mpos.x < hp.x + hw && mpos.y > hp.y && mpos.y < hp.y + hh)
+            { hoverIdx = static_cast<int>(i); break; }
+    }
+    // 悬停按钮抖动（20Hz, ±3px）
+    float jx = 0.f, jy = 0.f;
+    if (hoverIdx >= 0 && menuJitterClock.getElapsedTime().asSeconds() >= 1.f / 60.f) {
+        jx = (static_cast<float>(rand()) / RAND_MAX * 2.f - 1.f);
+        jy = (static_cast<float>(rand()) / RAND_MAX * 2.f - 1.f);
+        menuJitterClock.restart();
+    }
+    for (size_t i = 0; i < menuButtonBackgrounds.size(); ++i) {
+        sf::Vector2f bpos = menuButtonBackgrounds[i].getPosition();
+        sf::Vector2f bsize = menuButtonBackgrounds[i].getSize();
+        bool hover = (static_cast<int>(i) == hoverIdx);
+        float s = hover ? frameScale * 1.05f : frameScale;
+        float ox = hover ? 10.f : 0.f;
+        float oy = hover ? -10.f : 0.f;
+        float hx = hover ? jx : 0.f;
+        float hy = hover ? jy : 0.f;
+        uiFrameSpr.setScale({s, s});
+        uiFrameSpr.setPosition({bpos.x + bsize.x / 2.f - ox + hx, bpos.y + bsize.y / 2.f + oy + hy});
+        window.draw(uiFrameSpr);
+    }
+    for (auto& bg : menuButtonBackgrounds) window.draw(bg);  // 透明定位层
+    for (size_t i = 0; i < menuButtons.size(); ++i) {
+        auto& btn = menuButtons[i];
+        bool hover = (static_cast<int>(i) == hoverIdx);
+        if (hover) {
+            btn.setCharacterSize(50);  // 48 × 1.05
+            sf::Vector2f op = btn.getPosition();
+            btn.setPosition({op.x - 6.f + jx, op.y - 10.f + jy});
+            window.draw(btn);
+            btn.setPosition(op);
+            btn.setCharacterSize(48);
+        } else {
+            window.draw(btn);
+        }
+    }
+
+    // ── 第 5 层：乱码卡片（最上层，UI 之上，支持拖拽旋转）──
+    {
+        sf::Vector2i mp2 = sf::Mouse::getPosition(window);
+        sf::Vector2f mpos2 = window.mapPixelToCoords(mp2);
+        const float cardW = 800.f * 0.432f, cardH = 1112.f * 0.432f;
+        const float halfW = cardW / 2.f, halfH = cardH / 2.f;
+
+        float a = glitchAngle;
+        sf::Vector2f longAxis(std::sin(a), -std::cos(a));   // 位移轴（竖边）
+        sf::Vector2f mouseDelta = mpos2 - glitchPrevMouse;
+
+        if (sf::Mouse::isButtonPressed(sf::Mouse::Button::Left)) {
+            sf::FloatRect cardRect({glitchCardPos.x - halfW, glitchCardPos.y - halfH}, {cardW, cardH});
+            if (!glitchDragging && cardRect.contains(mpos2)) {
+                glitchDragging = true;
+                grabPoint = mpos2;
+                // 本地偏移 = 抓取点相对卡片中心的矢量，转到当前角度的本地空间
+                sf::Vector2f worldOff = grabPoint - glitchCardPos;
+                float ca = std::cos(-glitchAngle), sa = std::sin(-glitchAngle);
+                grabOffset.x = worldOff.x * ca - worldOff.y * sa;
+                grabOffset.y = worldOff.x * sa + worldOff.y * ca;
+                glitchVelocity = {0, 0};
+                glitchAngularVel = 0;
+                lastMouseDir = {0, 0};
+            }
+            if (glitchDragging) {
+                // ── 位移：抓取点跟随鼠标 ──
+                float ca2 = std::cos(glitchAngle), sa2 = std::sin(glitchAngle);
+                sf::Vector2f rotatedOffset;
+                rotatedOffset.x = grabOffset.x * ca2 - grabOffset.y * sa2;
+                rotatedOffset.y = grabOffset.x * sa2 + grabOffset.y * ca2;
+                glitchCardPos = mpos2 - rotatedOffset;
+
+                // ── 旋转：长轴追鼠标最后有效方向 ──
+                float angleDiff = 0.f, rotSpeed = 0.f;
+                float mdLen = std::sqrt(mouseDelta.x * mouseDelta.x + mouseDelta.y * mouseDelta.y);
+                if (mdLen > 0.5f) {
+                    lastMouseDir.x = mouseDelta.x / mdLen;
+                    lastMouseDir.y = mouseDelta.y / mdLen;
+                }
+                if (lastMouseDir.x != 0.f || lastMouseDir.y != 0.f) {
+                    // 抓下方时，长轴应追 -mouseDir（反方向），维持负反馈
+                    float sideFlip = (grabOffset.y > 0.f) ? -1.f : 1.f;
+                    float cross = longAxis.x * lastMouseDir.y * sideFlip - longAxis.y * lastMouseDir.x * sideFlip;
+                    float dot   = longAxis.x * lastMouseDir.x * sideFlip + longAxis.y * lastMouseDir.y * sideFlip;
+                    angleDiff = std::atan2(cross, dot);
+                    float leverDist = std::sqrt(grabOffset.x * grabOffset.x + grabOffset.y * grabOffset.y);
+                    rotSpeed = leverDist / (halfH * 1.5f);
+                    if (rotSpeed > 1.f) rotSpeed = 1.f;
+                    glitchAngle += angleDiff * rotSpeed * 0.25f;
+                }
+
+                // ── 边界 ──
+                if (glitchCardPos.x < halfW)      glitchCardPos.x = halfW;
+                if (glitchCardPos.x > 2560-halfW) glitchCardPos.x = 2560-halfW;
+                if (glitchCardPos.y < halfH)      glitchCardPos.y = halfH;
+                if (glitchCardPos.y > 1440-halfH) glitchCardPos.y = 1440-halfH;
+
+                // ── 释放动量 ──
+                glitchVelocity = mouseDelta;
+                glitchAngularVel = angleDiff * rotSpeed * 0.5f;
+            }
+        } else {
+            if (glitchDragging) { glitchDragging = false; }
+            // 线性动量
+            glitchCardPos += glitchVelocity;
+            // 角动量
+            glitchAngle += glitchAngularVel;
+            // 边界反弹
+            if (glitchCardPos.x - halfW < 0.f)     { glitchCardPos.x = halfW;      glitchVelocity.x = -glitchVelocity.x * 0.6f; glitchVelocity.y *= 0.8f; }
+            if (glitchCardPos.x + halfW > 2560.f)  { glitchCardPos.x = 2560.f-halfW; glitchVelocity.x = -glitchVelocity.x * 0.6f; glitchVelocity.y *= 0.8f; }
+            if (glitchCardPos.y - halfH < 0.f)     { glitchCardPos.y = halfH;      glitchVelocity.y = -glitchVelocity.y * 0.6f; glitchVelocity.x *= 0.8f; }
+            if (glitchCardPos.y + halfH > 1440.f)  { glitchCardPos.y = 1440.f-halfH; glitchVelocity.y = -glitchVelocity.y * 0.6f; glitchVelocity.x *= 0.8f; }
+            // 衰减
+            glitchVelocity *= 0.92f;
+            glitchAngularVel *= 0.96f;
+            if (std::abs(glitchVelocity.x) < 0.1f && std::abs(glitchVelocity.y) < 0.1f) glitchVelocity = {0,0};
+            if (std::abs(glitchAngularVel) < 0.0001f) glitchAngularVel = 0;
+        }
+        glitchPrevMouse = mpos2;
+
+        // 渲染卡片（带旋转）
+        sf::Vector2u ct3 = newCardTexture.getSize();
+        newCardSprite->setScale({0.432f, 0.432f});
+        newCardSprite->setPosition(glitchCardPos);
+        newCardSprite->setRotation(sf::radians(glitchAngle));
+        newCardSprite->setTextureRect(sf::IntRect({0,0}, {(int)ct3.x, (int)ct3.y}));
+        newCardSprite->setColor(sf::Color(255,255,255,255));
+        window.draw(*newCardSprite);
+        newCardSprite->setRotation(sf::degrees(0));  // 重置，不影响游戏渲染
+
+        // 乱码文字（不旋转，始终跟随卡片中心）
+        const std::wstring pool = L"连击给两次数落子隐忍迫使敌为胜途方承六星受笼络销毁己一个棋转化破釜沉舟将手牌放回库根据量";
+        int poolSize = (int)pool.size();
+        if (menuGlitchClock.getElapsedTime().asSeconds() >= 0.08f) {
+            for (auto& c : glitchName) c = pool[rand() % poolSize];
+            for (auto& c : glitchDesc) if (c != L'\n') c = pool[rand() % poolSize];
+            menuGlitchClock.restart();
+        }
+        float gs = 0.432f / 0.36f;
+        float cx = glitchCardPos.x, cy = glitchCardPos.y;
+        sf::Transform rotTx;
+        rotTx.rotate(sf::radians(glitchAngle), glitchCardPos);
+
+        uiText.setFont(cardFont);
+        uiText.setCharacterSize((int)(28.f * gs));
+        uiText.setFillColor(sf::Color(255,255,255,200));
+        uiText.setString(sf::String(glitchName));
+        uiText.setPosition({cx - 52.f * gs - 30.f, cy - 164.f * gs});
+        window.draw(uiText, rotTx);
+        uiText.setCharacterSize((int)(24.f * gs));
+        uiText.setFillColor(sf::Color(230,230,230,180));
+        float descBaseY = cy - 90.f * gs;
+        std::wstring line; int lineNum = 0;
+        for (auto c : glitchDesc) {
+            if (c == L'\n') { uiText.setString(sf::String(line)); uiText.setPosition({cx - 88.f * gs, descBaseY + lineNum * 20.f * gs}); window.draw(uiText, rotTx); line.clear(); lineNum++; }
+            else line += c;
+        }
+        if (!line.empty()) { uiText.setString(sf::String(line)); uiText.setPosition({cx - 88.f * gs, descBaseY + lineNum * 20.f * gs}); window.draw(uiText, rotTx); }
+        uiText.setFont(font);
+    }
 }
 
 void GameEngine::renderPVEConfig() {

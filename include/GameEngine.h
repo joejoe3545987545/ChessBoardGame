@@ -237,7 +237,54 @@ private:
     sf::Sprite  menuWhiteSpr{menuWhiteTex};
     sf::Sprite  menuBlackSpr{menuBlackTex};
     sf::Sprite  menuFogSpr{menuFogTex};
-    sf::Clock   menuPieceClock;  // 菜单棋子抛物线动画时钟
+    sf::Texture uiFrameTex;
+    sf::Sprite  uiFrameSpr{uiFrameTex};
+    sf::Texture mainTitleTex;
+    sf::Sprite  mainTitleSpr{mainTitleTex};
+    sf::Clock   menuPieceClock;   // 菜单棋子抛物线动画时钟
+    sf::Clock   menuJitterClock;   // 菜单按钮悬停抖动时钟
+    sf::Clock   menuGlitchClock;   // 乱码文字刷新时钟
+    std::wstring glitchName = L"乱码乱码乱";
+    std::wstring glitchDesc = L"混沌无序混沌无序\n混沌无序混沌无序\n混沌无序混沌无序\n混沌无序混沌无序\n混沌无序混沌无序\n混沌无序混沌无序\n混沌无序混沌无序\n混沌无序混沌无序";
+    // 乱码卡片拖拽
+    sf::Vector2f glitchCardPos{2260.f, 1200.f};
+    float        glitchAngle = 0.f;
+    float        glitchAngularVel = 0.f;
+    bool         glitchDragging = false;
+    sf::Vector2f grabPoint{0.f, 0.f};     // 世界坐标抓取点
+    sf::Vector2f grabOffset{0.f, 0.f};    // 本地偏移（抓取点相对卡片中心）
+    sf::Vector2f glitchVelocity{0.f, 0.f};
+    sf::Vector2f glitchPrevMouse{0.f, 0.f};
+    sf::Vector2f lastMouseDir{0.f, 0.f};  // 最后有效鼠标方向
+
+    // 🌟 主菜单星空背景帧动画
+    static constexpr int  BG_TOTAL_FRAMES = 1500;
+    sf::Texture bgTexA;
+    sf::Sprite  bgSprA{bgTexA};
+    sf::Clock   bgFrameClock;
+
+    // 🌟 画中画系统 (640×360)
+    sf::RenderTexture pipRT;
+    sf::Sprite*       pipSpr = nullptr;
+    sf::View          pipView{sf::FloatRect({0.f, 0.f}, {1280.f, 720.f})};
+    sf::Vector2f      pipPos{320.f, 540.f};
+    // PIP 动画循环系统
+    int               pipAnimIndex = 1;   // 当前动画编号 (1,2,3...)
+    int               pipAnimState = 0;   // 动画内子阶段
+    sf::Clock         pipClock;           // 往返运动时钟
+    sf::Clock         pipAnimClock;       // 当前动画已用时
+    void pipAnimNext();                   // 切换到下一个动画
+    void pipAnimStart(int animIdx);       // 启动指定编号的动画
+    float      pipFadeAlpha = 0.f;        // PIP 淡入淡出 alpha
+    sf::Clock  pipFadeClock;              // 动画已用时间（同 pipAnimClock）
+    float      pipTotalDur = 10.f;        // 当前动画总时长（由 anim 设置）
+    // PIP 边界反弹暂停
+    enum PipBounceState { BOUNCE_NONE, BOUNCE_OUT, BOUNCE_HIDE, BOUNCE_IN };
+    PipBounceState pipBounce = BOUNCE_NONE;
+    sf::Clock      pipBounceClock;
+    float          pipBounceAlpha = 1.f;  // 额外的边界 alpha
+    static constexpr float PIP_W = 1280.f;
+    static constexpr float PIP_H = 720.f;
 };
 
 #endif // GAMEENGINE_H
