@@ -44,6 +44,7 @@ private:
     bool handleHUDClick(sf::Vector2i mousePos);
     void handleSettingsClick(sf::Vector2i mousePos);
     void handleHistoryClick(sf::Vector2i mousePos);
+    void handlePauseMenuClick(sf::Vector2i mousePos);
 
     // UI 初始化
     void initUI();
@@ -77,7 +78,16 @@ private:
     bool isProfessionalMode;
     std::wstring winReason;
     bool isGameOver;
+    bool isPaused = false;               // 对局暂停（ESC 切换）
+    sf::Clock pauseFadeClock;            // 暂停遮罩淡入计时
     bool isBusyAnimating = false;       // 🌟 卡牌动画期间锁定玩家操作和 AI
+
+    // 🌟 疫病系统
+    bool infected[15][15] = {};          // 棋子疫病标记
+    bool infectionActive[15][15] = {};   // 疫病是否进入活跃期（可传播）
+    int  plagueOwner = 0;                // 疫病发起方（1=黑, 2=白），决定传播概率
+    int  quarantineTimer = -1;           // 隔离倒计时（-1=未激活, 0=本回合完成, >0=剩余回合）
+    void processInfection();             // 每回合处理疫病传播和销毁
     bool isSelectingPiece = false;      // 🌟 笼络选子模式
     int  selectPieceStep  = 0;          // 1=选己方, 2=销毁动画中/等待, 3=转化动画中
     int  selectPiecePlayer = 0;         // 谁在选子
@@ -108,6 +118,14 @@ private:
     void settleActionPoints();                       // 🌟 总体行动点结算中心（决定回合是否结束）
     bool applyCardEffect(const Card& card);         // 🌟 卡牌效果分发器（true=即时完成 false=延迟）
     void executeSacrificeDestroy(int destroyCount); // 🌟 破釜沉舟销毁阶段（退牌动画完成后调用）
+
+    // AI 出牌动画
+    void startAICardPlay(int handIndex);
+    void updateAICardAnimation();
+
+    // 紫卡传送
+    void startPurpleCardSend(int handIndex);
+    void updatePurpleCardSend();
 
     // ===== 人机对战设置 =====
     int playerColorPref;      // 1: 玩家执黑, 2: 玩家执白
@@ -171,9 +189,11 @@ private:
     static constexpr float BATTLE_02_BASE_TIME  = 30.f;
     static constexpr float BATTLE_VOLUME        = 40.f;
 
-    // 🌟【新增：魔幻像素卡牌底底纹与精灵】
+    // 🌟 卡牌底纹与精灵（橙卡 + 紫卡）
     sf::Texture newCardTexture;
     sf::Sprite* newCardSprite = nullptr;
+    sf::Texture purpleCardTexture;
+    sf::Sprite* purpleCardSprite = nullptr;
     // 🌟【新增：卡槽纹理与精灵】
     sf::Texture cardSlotTexture;
     sf::Sprite* cardSlotSprite = nullptr;
@@ -183,9 +203,10 @@ private:
     // 多卡堆叠相关
     bool newCardJustDrawn = false;  // 本帧刚抽到卡，触发出生动画（比 handSize 变化更可靠）
 
-    // 🌟【新增：CardReader正下方的圆形检测区域】
-    sf::CircleShape detectionZone;
-    float zoneRadius = 240.0f; // 暂定半径为50像素，后续可以根据实际大小微调
+    // 🌟【CardReader / CardPortal 检测区域】
+    sf::CircleShape detectionZone;        // Reader 检测区 (300, 380)
+    sf::CircleShape portalDetectionZone;  // Portal 检测区 (300, 1060)
+    float zoneRadius = 240.0f;
 
     // 🌟【新增：卡牌高精动效时序控制器】
     sf::Clock cardAnimClock;      // 记录卡牌动画已经播了多久
@@ -219,6 +240,21 @@ private:
     Card showcasedCard;                 // 存储被展示的卡牌数据（pop 后保留）
     sf::Clock showcaseClock;            // 展示阶段独立时钟
 
+    // 🌟 AI 出牌动画状态机
+    enum class AICardPlayState { IDLE, RISING, PAUSE_AT_CENTER, TO_READER, ANNIHILATING, SHOWCASING };
+    AICardPlayState aiCardPlayState = AICardPlayState::IDLE;
+    sf::Clock aiCardPlayClock;
+    sf::Vector2f aiCardAnimPos{300.f, 1230.f};
+    int  aiPlayingCardIndex = -1;
+    bool aiCardFromPortal = false;
+
+    // 🌟 紫卡传送动画
+    enum class PurpleSendState { IDLE, PAUSE_BEFORE, MOVE_TO_PORTAL };
+    PurpleSendState purpleSendState = PurpleSendState::IDLE;
+    sf::Clock purpleSendClock;
+    sf::Vector2f purpleSendPos{300.f, 1060.f};
+    int  purpleSendIndex = -1;
+
     // 🌟【新增：读卡器夹层素材】
     // CardReader（上方）
     std::unique_ptr<sf::Texture> cardReaderTopTexture;
@@ -241,6 +277,11 @@ private:
     sf::Sprite  uiFrameSpr{uiFrameTex};
     sf::Texture mainTitleTex;
     sf::Sprite  mainTitleSpr{mainTitleTex};
+    sf::Texture settingsMenuTex;
+    sf::Sprite  settingsMenuSpr{settingsMenuTex};
+    bool        settingsMenuLoaded = false;
+    sf::Texture virusTex;
+    sf::Sprite  virusSpr{virusTex};
     sf::Clock   menuPieceClock;   // 菜单棋子抛物线动画时钟
     sf::Clock   menuJitterClock;   // 菜单按钮悬停抖动时钟
     sf::Clock   menuGlitchClock;   // 乱码文字刷新时钟
@@ -248,6 +289,7 @@ private:
     std::wstring glitchDesc = L"混沌无序混沌无序\n混沌无序混沌无序\n混沌无序混沌无序\n混沌无序混沌无序\n混沌无序混沌无序\n混沌无序混沌无序\n混沌无序混沌无序\n混沌无序混沌无序";
     // 乱码卡片拖拽
     sf::Vector2f glitchCardPos{2260.f, 1200.f};
+    sf::Vector2f glitchRenderPos{2260.f, 1200.f};  // 渲染插值位置（平滑追赶物理位置）
     float        glitchAngle = 0.f;
     float        glitchAngularVel = 0.f;
     bool         glitchDragging = false;
@@ -257,11 +299,12 @@ private:
     sf::Vector2f glitchPrevMouse{0.f, 0.f};
     sf::Vector2f lastMouseDir{0.f, 0.f};  // 最后有效鼠标方向
 
-    // 🌟 主菜单星空背景帧动画
+    // 🌟 星空背景帧动画（全界面共用，update() 统一加载）
     static constexpr int  BG_TOTAL_FRAMES = 1500;
     sf::Texture bgTexA;
     sf::Sprite  bgSprA{bgTexA};
     sf::Clock   bgFrameClock;
+    int         bgCurrentFrame = -1;  // 缓存当前帧号，避免重复加载
 
     // 🌟 画中画系统 (640×360)
     sf::RenderTexture pipRT;

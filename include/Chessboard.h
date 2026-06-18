@@ -65,6 +65,11 @@ public:
     void finishPieceAnim();   // 清除动画状态（grid 更新后调用）
     int  animRow = -1, animCol = -1;
 
+    // 落子动画（抛物线坠落到格子）
+    void startDropAnim(int row, int col, int player);
+    bool isDropAnimating() const;
+    void drawDropAnim(sf::RenderTarget& target);
+
 private:
     int grid[15][15];
     int usedMask[15][15] = {};  // 每位对应一个方向: 0=H 1=V 2=↘ 3=↗
@@ -108,6 +113,11 @@ private:
     int  pieceAnimTo = 0;         // 目标颜色
     bool pieceAnimJustDone = false;
     sf::Clock pieceAnimClock;
+
+    // 落子动画状态
+    bool dropAnimating = false;
+    int  dropAnimRow = -1, dropAnimCol = -1, dropAnimPlayer = 0;
+    sf::Clock dropAnimClock;
 };
 
 #endif // CHESSBOARD_H

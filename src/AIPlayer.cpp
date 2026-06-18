@@ -35,7 +35,7 @@ void AIPlayer::evaluateLine(
     int dc,
     int pieceType,
     int& count,
-    int& openEnds)
+    int& openEnds) const
 {
     count = 1;
     openEnds = 0;
@@ -82,7 +82,7 @@ void AIPlayer::evaluateLine(
 bool AIPlayer::hasNeighbor(
     const Chessboard& chessboard,
     int row,
-    int col)
+    int col) const
 {
     for (int dr = -2; dr <= 2; dr++)
     {
@@ -110,7 +110,7 @@ int AIPlayer::evaluatePosition(
     const Chessboard& chessboard,
     int row,
     int col,
-    int pieceType)
+    int pieceType) const
 {
     static const int directions[4][2] =
     {
@@ -399,4 +399,134 @@ std::pair<int,int> AIPlayer::playGodMode(
     }
 
     return bestMove;
+}
+
+// ===== AI 卡牌决策 =====
+
+int AIPlayer::countPieces(const Chessboard& chessboard, int pieceType) const {
+    int count = 0;
+    for (int r = 0; r < 15; ++r)
+        for (int c = 0; c < 15; ++c)
+            if (chessboard.getPiece(r, c) == pieceType) ++count;
+    return count;
+}
+
+int AIPlayer::evaluateCard(const Card& card, const Chessboard& chessboard) const {
+    // 紫卡优先出（负面效果给敌方）
+    if (card.cardColor == 1) return 120;
+
+    int score = 0;
+    int ownPieces = countPieces(chessboard, aiPiece);
+    int enemyPieces = countPieces(chessboard, playerPiece);
+
+    switch (card.effect) {
+    case CardEffect::FORCE_DROP:
+        score = 60;
+        if (ownPieces >= 10) score += 20;
+        break;
+    case CardEffect::CHANGE_WIN_RULE:
+        score = 80;
+        if (enemyPieces >= 8) score += 40;
+        break;
+    case CardEffect::CONVERT_PIECE:
+        score = 50;
+        if (ownPieces >= 5) score += 30;
+        if (enemyPieces >= 8) score += 20;
+        break;
+    case CardEffect::SACRIFICE_HAND:
+        score = 30;
+        if (enemyPieces >= 10) score += 40;
+        break;
+    default:
+        score = 20;
+        break;
+    }
+
+    auto& rng = globalRng();
+    std::uniform_int_distribution<int> noise(0, 1);
+    switch (aiDifficulty) {
+    case 1: score += (noise(rng) ? 30 : -30); break;
+    case 2: score += (noise(rng) ? 15 : -15); break;
+    default: break;
+    }
+
+    return score;
+}
+
+bool AIPlayer::shouldPlayCard(
+    const std::vector<Card>& aiHand,
+    const Chessboard& chessboard,
+    bool hasCardPlayAP) const
+{
+    if (aiHand.empty() || !hasCardPlayAP) return false;
+
+    int threshold = 80;
+    if (aiDifficulty == 2) threshold = 60;
+    if (aiDifficulty == 3) threshold = 40;
+
+    int bestScore = -999;
+    for (const auto& c : aiHand) {
+        int s = evaluateCard(c, chessboard);
+        if (s > bestScore) bestScore = s;
+    }
+
+    return bestScore >= threshold;
+}
+
+int AIPlayer::chooseCardToPlay(
+    const std::vector<Card>& aiHand,
+    const Chessboard& chessboard) const
+{
+    if (aiHand.empty()) return -1;
+
+    int bestIdx = -1;
+    int bestScore = -999;
+    for (size_t i = 0; i < aiHand.size(); ++i) {
+        int s = evaluateCard(aiHand[i], chessboard);
+        if (s > bestScore) { bestScore = s; bestIdx = static_cast<int>(i); }
+    }
+    return bestIdx;
+}
+
+bool AIPlayer::shouldPlayBeforeDrop(
+    const std::vector<Card>& aiHand,
+    const Chessboard& chessboard) const
+{
+    for (const auto& c : aiHand) {
+        if (c.effect == CardEffect::FORCE_DROP) return true;
+        if (c.cardColor == 1) return true; // 紫卡优先发送
+        if (c.effect == CardEffect::CHANGE_WIN_RULE &&
+            countPieces(chessboard, playerPiece) >= 8) return true;
+    }
+    return false;
+}
+
+std::pair<int,int> AIPlayer::chooseOwnPieceToSacrifice(
+    const Chessboard& chessboard) const
+{
+    int bestR = -1, bestC = -1;
+    int worstScore = 999999;
+    for (int r = 0; r < 15; ++r) {
+        for (int c = 0; c < 15; ++c) {
+            if (chessboard.getPiece(r, c) != aiPiece) continue;
+            int sc = evaluatePosition(chessboard, r, c, aiPiece);
+            if (sc < worstScore) { worstScore = sc; bestR = r; bestC = c; }
+        }
+    }
+    return {bestR, bestC};
+}
+
+std::pair<int,int> AIPlayer::chooseEnemyPieceToConvert(
+    const Chessboard& chessboard) const
+{
+    int bestR = -1, bestC = -1;
+    int bestScore = -1;
+    for (int r = 0; r < 15; ++r) {
+        for (int c = 0; c < 15; ++c) {
+            if (chessboard.getPiece(r, c) != playerPiece) continue;
+            int sc = evaluatePosition(chessboard, r, c, playerPiece);
+            if (sc > bestScore) { bestScore = sc; bestR = r; bestC = c; }
+        }
+    }
+    return {bestR, bestC};
 }

@@ -11,6 +11,14 @@ void DeckManager::initDeck() {
     deck.push_back({3, L"隐忍", L"迫使敌方承受：\n六子连星为胜途", CardEffect::CHANGE_WIN_RULE, 6});
     deck.push_back({4, L"笼络", L"销毁己方一个棋子\n转化敌方一个棋子", CardEffect::CONVERT_PIECE, 0});
     deck.push_back({5, L"破釜沉舟", L"将手牌放回牌库\n根据放回的数量\n销毁敌方棋子", CardEffect::SACRIFICE_HAND, 0});
+    deck.push_back({6, L"疫病", L"指定一颗敌方棋子\n使其患上疫病\n患病棋子每回合都\n有概率死亡并试图\n传染给其他棋子\n玩家棋子也有患病\n风险", CardEffect::PLAGUE, 0});
+    deck.push_back({6, L"疫病", L"指定一颗敌方棋子\n使其患上疫病\n患病棋子每回合都\n有概率死亡并试图\n传染给其他棋子\n玩家棋子也有患病\n风险", CardEffect::PLAGUE, 0});
+    deck.push_back({7, L"隔离", L"使患病棋子在三回\n合后痊愈", CardEffect::QUARANTINE, 4});
+    deck.push_back({7, L"隔离", L"使患病棋子在三回\n合后痊愈", CardEffect::QUARANTINE, 4});
+    deck.push_back({7, L"隔离", L"使患病棋子在三回\n合后痊愈", CardEffect::QUARANTINE, 4});
+    // 测试紫卡（cardColor=1）
+    deck.push_back({8, L"诅咒测试", L"紫卡框架验证\n传送给敌方生效", CardEffect::NONE, 0, 1});
+    deck.push_back({8, L"诅咒测试", L"紫卡框架验证\n传送给敌方生效", CardEffect::NONE, 0, 1});
 }
 
 void DeckManager::playCard(int index, Chessboard& board) {
@@ -50,8 +58,36 @@ void DeckManager::discardCard(const Card& card) {
               << " 弃牌堆大小: " << discardPile.size() << std::endl;
 }
 
+// ── AI 手牌管理 ──
+void DeckManager::drawCardForAI() {
+    if (!deck.empty()) {
+        int idx = rand() % static_cast<int>(deck.size());
+        aiHand.push_back(deck[idx]);
+        deck.erase(deck.begin() + idx);
+        std::cout << "[CardSystem] AI 抽卡！AI手牌数: " << aiHand.size()
+                  << " 剩余牌库: " << deck.size() << std::endl;
+    } else {
+        std::cout << "[CardSystem] 牌库空了，AI 无法抽卡！" << std::endl;
+    }
+}
+
+void DeckManager::aiDiscardCard(int index) {
+    if (index < 0 || index >= static_cast<int>(aiHand.size())) return;
+    discardPile.push_back(aiHand[index]);
+    std::cout << "[CardSystem] AI 弃牌: " << aiHand[index].name.c_str()
+              << " 弃牌堆大小: " << discardPile.size() << std::endl;
+    aiHand.erase(aiHand.begin() + index);
+}
+
+void DeckManager::returnAiHandToDeck() {
+    for (auto& c : aiHand) deck.push_back(c);
+    aiHand.clear();
+    std::cout << "[CardSystem] AI 手牌已全部回到牌库，牌库大小: " << deck.size() << std::endl;
+}
+
 void DeckManager::resetDeck() {
     hand.clear();
+    aiHand.clear();
     deck.clear();
     discardPile.clear();
     initDeck();

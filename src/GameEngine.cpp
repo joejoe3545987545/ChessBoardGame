@@ -8,6 +8,7 @@
 #include <chrono>
 #include <iomanip>
 #include <algorithm>
+#include <cstring>
 
 
 // ------------------------ 辅助：资源路径查找 ------------------------
@@ -146,6 +147,14 @@ GameEngine::GameEngine()
     } else {
         std::cerr << "[❌ Error] 找不到卡牌底图: assets/Card.png" << std::endl;
     }
+    // 紫卡底纹
+    if (purpleCardTexture.loadFromFile(getEngineAssetPath("assets/Card_01.png"))) {
+        purpleCardTexture.setSmooth(true);
+        purpleCardSprite = new sf::Sprite(purpleCardTexture);
+        sf::Vector2u ps = purpleCardTexture.getSize();
+        purpleCardSprite->setOrigin({ps.x / 2.f, ps.y / 2.f});
+        std::cout << "[UI] 紫卡底纹 Card_01.png 加载成功" << std::endl;
+    }
     // ===== 🌟 紧跟在 newCardSprite 初始化下方的卡槽初始化 =====
     if (cardSlotTexture.loadFromFile("assets/CardSlot.png")) { // 💡 确认好你的素材路径
         cardSlotSprite = new sf::Sprite(cardSlotTexture);
@@ -182,12 +191,19 @@ GameEngine::GameEngine()
         detectionZone.setPosition({centerX, centerY});
 
         // 开发调试用颜色：半透明绿，方便等会儿测试看位置
-        detectionZone.setFillColor(sf::Color(0, 0, 0, 0)); 
+        detectionZone.setFillColor(sf::Color(0, 0, 0, 0));
         detectionZone.setOutlineThickness(0.f);
         detectionZone.setOutlineColor(sf::Color::Green);
     } else {
         std::cerr << "[UI Error] 卡槽精灵未初始化，无法设置检测区域。" << std::endl;
     }
+    // CardPortal 检测区（与 Reader 对称，Y=1060）
+    portalDetectionZone.setRadius(zoneRadius);
+    portalDetectionZone.setOrigin({zoneRadius, zoneRadius});
+    portalDetectionZone.setPosition({300.f, 1060.f});
+    portalDetectionZone.setFillColor(sf::Color(0, 0, 0, 0));
+    portalDetectionZone.setOutlineThickness(0.f);
+    portalDetectionZone.setOutlineColor(sf::Color(128, 0, 128)); // 紫色调试框
     // 🌟 第二卡槽（卡槽 1 正下方 220px，当前空置备用）
     if (cardSlotTexture2.loadFromFile(getEngineAssetPath("assets/CardSlot.png"))) {
         cardSlotTexture2.setSmooth(true);
@@ -277,6 +293,15 @@ GameEngine::GameEngine()
         mainTitleSpr.setTexture(mainTitleTex, true);
         mainTitleSpr.setOrigin({mainTitleTex.getSize().x / 2.f, mainTitleTex.getSize().y / 2.f});
     }
+    settingsMenuLoaded = settingsMenuTex.loadFromFile(getEngineAssetPath("assets/SettingsMenu.png"));
+    if (settingsMenuLoaded) {
+        settingsMenuSpr.setTexture(settingsMenuTex, true);
+        settingsMenuSpr.setOrigin({settingsMenuTex.getSize().x / 2.f, settingsMenuTex.getSize().y / 2.f});
+    }
+    if (virusTex.loadFromFile(getEngineAssetPath("assets/virus.png"))) {
+        virusSpr.setTexture(virusTex, true);
+        virusSpr.setOrigin({virusTex.getSize().x / 2.f, virusTex.getSize().y / 2.f});
+    }
     // 🌟 画中画初始化
     pipRT.resize({1280u, 720u});
     pipSpr = new sf::Sprite(pipRT.getTexture());
@@ -320,7 +345,6 @@ void GameEngine::initUI() {
 } else {
     std::cout << "[Font] 卡牌专属视觉字体加载成功！" << std::endl;
 }
-
     std::vector<std::wstring> menuTexts = {
         L"本地双人对战", L"人机对战", L"游戏设置", L"规则说明帮助", L"历史记录复盘", L"退出游戏"
     };
@@ -353,24 +377,12 @@ void GameEngine::initUI() {
         menuButtons.push_back(t);
     }
 
-    // 游戏HUD按钮：位于底部，3个按钮均匀分布
-    std::vector<std::wstring> hudLabels = {L"认输放弃", L"重新开局", L"返回主页"};
-    for (size_t i = 0; i < hudLabels.size(); ++i) {
-        sf::RectangleShape btn({180.f, 54.f});
-        btn.setPosition({static_cast<float>(120 + i * 600), 1020.f});
-        btn.setFillColor(sf::Color(156, 107, 69));
-        gameButtons.push_back(btn);
-
-        sf::Text t(font, hudLabels[i], 30);
-        t.setFillColor(sf::Color::White);
-        t.setPosition({static_cast<float>(142.5f + i * 600), 1025.f});
-        gameButtonTexts.push_back(t);
-    }
+    // 游戏 HUD 按钮已移除，改为 ESC 暂停菜单
 }
 
 
 // ── PIP 动画循环系统 ──
-static constexpr int PIP_ANIM_COUNT = 2;  // 当前动画总数
+static constexpr int PIP_ANIM_COUNT = 3;  // 当前动画总数
 
 void GameEngine::pipAnimNext() {
     pipAnimIndex++;
@@ -440,12 +452,24 @@ void GameEngine::processEvents() {
             window.close();
         }
 
-        // F11 切换全屏 / 窗口， Escape 退出
+        // F11 切换全屏 / 窗口
         if (const auto* keyEv = event->getIf<sf::Event::KeyPressed>()) {
             if (keyEv->code == sf::Keyboard::Key::F11) {
                 toggleFullscreen();
             } else if (keyEv->code == sf::Keyboard::Key::Escape) {
-                window.close();
+                if (currentState == GameState::GAME_PVP || currentState == GameState::GAME_PVE) {
+                    isPaused = !isPaused;
+                    if (isPaused) {
+                        pauseFadeClock.restart();  // 进入 → 淡入
+                        if (!isTurnPaused) { isTurnPaused = true; pauseClock.restart(); }
+                    } else {
+                        pauseFadeClock.restart();  // 退出 → 淡出
+                        if (isTurnPaused) {
+                            turnTimePaused += pauseClock.getElapsedTime().asSeconds();
+                            isTurnPaused = false;
+                        }
+                    }
+                }
             }
         }
 
@@ -475,22 +499,69 @@ void GameEngine::processEvents() {
                     handleHistoryClick(mousePos);
                 }
                 else if (currentState == GameState::GAME_OVER) {
-                    // 计算出屏幕正中心按钮的精确点击范围
-                    if (mousePos.x > 1180 && mousePos.x < 1380 && mousePos.y > 420 && mousePos.y < 470) {
+                    // 检测区：宽 352，高 120.6，以 (centerX, 680) 为中心
+                    float btnCX = WINDOW_WIDTH * 0.5f;
+                    float btnHitW = 320.f * 1.1f;
+                    float btnHitH = 67.f * 1.8f;
+                    float btnTop = 680.f - btnHitH * 0.5f;
+                    if (mousePos.x > btnCX - btnHitW * 0.5f && mousePos.x < btnCX + btnHitW * 0.5f &&
+                        mousePos.y > btnTop && mousePos.y < btnTop + btnHitH) {
                         std::cout << "[UI] Game Over Screen: Return to Main Menu clicked." << std::endl;
                         
                         chessboard.reset();
                         playerDeck.resetDeck();
+            memset(infected, 0, sizeof(infected)); memset(infectionActive, 0, sizeof(infectionActive)); quarantineTimer = -1; plagueOwner = 0;
+            aiCardPlayState = AICardPlayState::IDLE; aiPlayingCardIndex = -1;
                         
                         currentTurn = 1;
                         isAiThinking = false;
                         isGameOver = false;
                         savedThisGame = false;
-                        
+                        isPaused = false;
+                        isSelectingPiece = false;
+                        selectPieceStep = 0;
+                        pendingDestroys.clear();
+                        isBulkDestroying = false;
+                        isReturningHandToDeck = false;
+                        isCardAttachedToMouse = false;
+                        attachedCardIndex = -1;
+                        handSlotAssign.clear();
+                        isReturningToSlot = false;
+                        newCardJustDrawn = false;
+                        showcaseState = CardShowcaseState::NONE;
+                        annihilateState = CardAnnihilateState::NONE;
+                        isTurnPaused = false;
+                        turnTimePaused = 0.f;
+                        isBusyAnimating = false;
+                        currentTurnActionPoints.clear();
+                        // 停止所有战斗/结算音乐
+                        battleMusic.stop();
+                        battleMusic02.stop();
+                        battleMusicState = BattleMusicState::NORMAL;
+                        winMusic.stop();
+                        failMusic.stop();
+                        // 重置乱码卡片
+                        glitchCardPos = {2260.f, 1200.f};
+                        glitchAngle = 0.f;
+                        glitchAngularVel = 0.f;
+                        glitchDragging = false;
+                        glitchVelocity = {0.f, 0.f};
+                        glitchPrevMouse = {0.f, 0.f};
+                        lastMouseDir = {0.f, 0.f};
+                        glitchRenderPos = {2260.f, 1200.f};
+                        // 重置卡牌精灵
+                        if (newCardSprite) newCardSprite->setPosition({2260.f, 160.f});
+
                         currentState = GameState::MENU;
                     }
                 }
                 else if (currentState == GameState::GAME_PVP || currentState == GameState::GAME_PVE) {
+                    // 暂停菜单拦截所有点击
+                    if (isPaused) {
+                        handlePauseMenuClick(mousePos);
+                        continue;
+                    }
+
                     if (currentState == GameState::GAME_PVE && currentTurn != playerColorPref) {
                         // 🌟【注意】：在标准事件循环中，如果需要跳过非玩家回合的其余点击，用 continue 是对 vacuum 的
                         continue;
@@ -516,7 +587,22 @@ void GameEngine::processEvents() {
                         int row = static_cast<int>(std::round((mousePos.y - by) / 72.f));
                         if (row >= 0 && row < 15 && col >= 0 && col < 15) {
                             int piece = chessboard.getPiece(row, col);
-                            if (selectPieceStep == 1 && piece == selectPiecePlayer) {
+                            if (selectPieceStep == 10 && piece != 0 && piece != selectPiecePlayer) {
+                                // 疫病选子：感染敌方棋子
+                                infected[row][col] = true; infectionActive[row][col] = false;
+                                plagueOwner = selectPiecePlayer;
+                                isSelectingPiece = false;
+                                selectPieceStep = 0;
+                                std::cout << "[Plague] 疫病感染棋子 (" << row << "," << col << ")" << std::endl;
+                                // 完成卡牌效果（同即时效果恢复流程）
+                                if (isTurnPaused) {
+                                    turnTimePaused += pauseClock.getElapsedTime().asSeconds();
+                                    isTurnPaused = false;
+                                }
+                                consumeActionPoint(false);
+                                settleActionPoints();
+                                isBusyAnimating = false;
+                            } else if (selectPieceStep == 1 && piece == selectPiecePlayer) {
                                 chessboard.startDestroyAnim(row, col);
                                 isBusyAnimating = true;
                                 selectPieceStep = 2;
@@ -550,7 +636,10 @@ void GameEngine::processEvents() {
 
                     // 行动点检查通过，允许调用棋盘的原生落子逻辑
                     if (chessboard.handleMouseClick(mousePos, currentTurn, lastRow, lastCol)) {
-                        
+
+                        // 落子抛物线动画
+                        chessboard.startDropAnim(lastRow, lastCol, currentTurn);
+
                         // 🌟【行动点核销】：落子物理成功！核销扣除 1 个支持下棋的行动点
                         consumeActionPoint(true);
 
@@ -562,10 +651,13 @@ void GameEngine::processEvents() {
                         int dir = -1;
                         int pattern = chessboard.checkPattern(lastRow, lastCol, dir);
                         if (pattern == 3 || pattern == 4) {
+                            size_t before = playerDeck.hand.size();
                             playerDeck.drawCard();
-                            handSlotAssign.push_back(1);  // 新卡默认放入槽 1
-                            newCardJustDrawn = true;      // 触发出生动画
-                            chessboard.markPatternUsed(lastRow, lastCol, dir); // 标记已使用
+                            if (playerDeck.hand.size() > before) {
+                                handSlotAssign.push_back(1);
+                                newCardJustDrawn = true;
+                            }
+                            chessboard.markPatternUsed(lastRow, lastCol, dir);
                         }
                         // 🎵 四子连星 → 危机触发，延长 battle_02 或作为切歌入口
                         if (pattern == 4) {
@@ -627,6 +719,8 @@ void GameEngine::handleMenuClick(sf::Vector2i mousePos) {
         if (mousePos.y > menuStartY && mousePos.y < menuStartY + hitHeight) {
             chessboard.reset();
             playerDeck.resetDeck();
+            memset(infected, 0, sizeof(infected)); memset(infectionActive, 0, sizeof(infectionActive)); quarantineTimer = -1; plagueOwner = 0;
+            aiCardPlayState = AICardPlayState::IDLE; aiPlayingCardIndex = -1;
             handSlotAssign.clear();
             attachedCardIndex = -1;
             isCardAttachedToMouse = false;
@@ -671,23 +765,30 @@ void GameEngine::handleMenuClick(sf::Vector2i mousePos) {
 }
 
 void GameEngine::handlePVEConfigClick(sf::Vector2i mousePos) {
+    // 与主菜单一致的检测区：宽 320×1.1=352, 高 67×1.8=120.6
     const float centerX = WINDOW_WIDTH * 0.5f;
-    const float btnWidth = 400.f;
-    const float btnLeft = centerX - btnWidth * 0.5f;
-    const float btnRight = centerX + btnWidth * 0.5f;
+    const float hitWidth  = 320.f * 1.1f;
+    const float hitHeight = 67.f * 1.8f;
+    const float hitX = centerX - hitWidth * 0.5f;
+    const float hitRX = centerX + hitWidth * 0.5f;
+    const float menuStartY = 543.f;
+    const float spacing = 137.f;
+    const float hyOff = (hitHeight - 67.f) * 0.5f;  // 检测区居中偏移
 
-    if (mousePos.x > btnLeft && mousePos.x < btnRight) {
-        if (mousePos.y > 140 && mousePos.y < 190) {
+    if (mousePos.x > hitX && mousePos.x < hitRX) {
+        if (mousePos.y > menuStartY - hyOff && mousePos.y < menuStartY - hyOff + hitHeight) {
             aiDifficultySetting = (aiDifficultySetting % 3) + 1;
             std::cout << "[Info] AI difficulty -> " << aiDifficultySetting << std::endl;
         }
-        else if (mousePos.y > 210 && mousePos.y < 260) {
+        else if (mousePos.y > menuStartY + spacing - hyOff && mousePos.y < menuStartY + spacing - hyOff + hitHeight) {
             playerColorPref = (playerColorPref == 1) ? 2 : 1;
             std::cout << "[Info] Player color -> " << (playerColorPref == 1 ? "Black" : "White") << std::endl;
         }
-        else if (mousePos.y > 350 && mousePos.y < 400) {
+        else if (mousePos.y > menuStartY + spacing * 2 - hyOff && mousePos.y < menuStartY + spacing * 2 - hyOff + hitHeight) {
             chessboard.reset();
             playerDeck.resetDeck();
+            memset(infected, 0, sizeof(infected)); memset(infectionActive, 0, sizeof(infectionActive)); quarantineTimer = -1; plagueOwner = 0;
+            aiCardPlayState = AICardPlayState::IDLE; aiPlayingCardIndex = -1;
             handSlotAssign.clear();
             attachedCardIndex = -1;
             isCardAttachedToMouse = false;
@@ -722,10 +823,9 @@ void GameEngine::handlePVEConfigClick(sf::Vector2i mousePos) {
                 aiThinkClock.restart();
             }
         }
-    }
-
-    if (mousePos.x > btnLeft && mousePos.x < btnRight && mousePos.y > 410 && mousePos.y < 460) {
-        currentState = GameState::MENU;
+        else if (mousePos.y > menuStartY + spacing * 3 - hyOff && mousePos.y < menuStartY + spacing * 3 - hyOff + hitHeight) {
+            currentState = GameState::MENU;
+        }
     }
 }
 
@@ -806,7 +906,28 @@ bool GameEngine::handleHUDClick(sf::Vector2i mousePos) {
                 float dy = mouseClickPos.y - 380.f;
                 float distance = std::sqrt(dx * dx + dy * dy);
 
-                if (distance <= zoneRadius) {
+                // ── 紫卡传送：检测 Portal 区域 ──
+                float pdx = mouseClickPos.x - 300.f;
+                float pdy = mouseClickPos.y - 1060.f;
+                float pDist = std::sqrt(pdx * pdx + pdy * pdy);
+                bool isPurpleCard = (attachedCardIndex >= 0 && attachedCardIndex < static_cast<int>(playerDeck.hand.size()) &&
+                                    playerDeck.hand[attachedCardIndex].cardColor == 1);
+
+                if (isPurpleCard && pDist <= zoneRadius) {
+                    if (!hasValidActionPoint(false)) {
+                        isCardAttachedToMouse = false;
+                        isReturningToSlot = true;
+                        returnStartPos = newCardSprite->getPosition();
+                        returnDelayClock.restart();
+                        return true;
+                    }
+                    // 紫卡传送：snap → 下滑 → 进入敌方手牌
+                    isCardAttachedToMouse = false;
+                    startPurpleCardSend(attachedCardIndex);
+                    return true;
+                }
+
+                if (distance <= zoneRadius && !isPurpleCard) {
                     // 🌟【行动点前置拦截】：在触发湮灭（即出牌）前，检查是否拥有"允许出牌"的行动点
                     if (!hasValidActionPoint(false)) {
                         // 没有出牌权限 → 拒绝湮灭，改为弹回卡槽
@@ -871,85 +992,123 @@ bool GameEngine::handleHUDClick(sf::Vector2i mousePos) {
             return true; // 拦截点击，防止穿透落子
         }
     }
-    // 1. 处理底部 HUD 按钮区域 (y: 665-701)
-    if (mousePos.y > 1020 && mousePos.y < 1074) {
-        if (mousePos.x > 120 && mousePos.x < 300) {
-            winReason = (currentTurn == 1) ? L"黑方认输，白方获胜！" : L"白方认输，黑方获胜！";
-            isGameOver = true;
-            currentState = GameState::GAME_OVER;
-            return true; // 告知外部：点击已被处理
-        }
-        else if (mousePos.x > 720 && mousePos.x < 900) { // 重新开局
-            chessboard.reset();
-            newCardJustDrawn = false;
-            handSlotAssign.clear();
-            attachedCardIndex = -1;
-            isCardAttachedToMouse = false;
-            isBusyAnimating = false;
-            isSelectingPiece = false;
-            selectPieceStep  = 0;
-            pendingDestroys.clear();
-            isBulkDestroying = false;
-            isReturningHandToDeck = false;
-            if (newCardSprite) newCardSprite->setPosition({2260.f, 160.f});
-            battleMusic.stop();
-            battleMusic.play();
-            battleMusic02.stop();
-            battleMusicState = BattleMusicState::NORMAL;
-            battleMusic.setVolume(BATTLE_VOLUME);
-            winMusic.stop();
-            playerDeck.resetDeck();
-            
-            // 🌟【确切位置 1】：在此处精准添加，保证局内主动点击“重新开局”时隐藏卡牌底图
-
-            currentTurn = 1;
-            initActionPointsForTurn();          // 🌟 重新开局时初始化行动点池
-            showcaseState = CardShowcaseState::NONE; // 🌟 重置卡牌展示状态
-            isAiThinking = false;
-            isGameOver = false;
-            savedThisGame = false;
-            turnClock.restart();
-            turnTimePaused = 0.f;  // 重置暂停累计
-            isTurnPaused   = false;
-            if (currentState == GameState::GAME_PVE && playerColorPref == 2) {
-                isAiThinking = true;
-                aiThinkClock.restart();
-            }
-            return true; // 告知外部：点击已被处理
-        }
-        else if (mousePos.x > 1320 && mousePos.x < 1500) { // 返回主菜单
-            battleMusic.stop();
-            battleMusic02.stop();
-            battleMusicState = BattleMusicState::NORMAL;
-            currentState = GameState::MENU;
-            return true; // 告知外部：点击已被处理
-        }
-        // 如果点击在 665-701 范围内但没点中按钮，依然返回 true 防止穿透到底层逻辑
-        return true; 
-    }
-
-    // 2. 处理手牌区域
+    // 处理手牌区域
     sf::Vector2f mousePoint(static_cast<float>(mousePos.x), static_cast<float>(mousePos.y));
     return false; // 没点中任何手牌
 }
 
-void GameEngine::handleSettingsClick(sf::Vector2i mousePos) {
+// ── 暂停菜单点击 ──
+void GameEngine::handlePauseMenuClick(sf::Vector2i mousePos) {
+    const float hitW = 320.f * 1.1f;
+    const float hitH = 67.f * 1.8f;
     const float centerX = WINDOW_WIDTH * 0.5f;
-    const float btnWidth = 400.f;
-    const float btnLeft = centerX - btnWidth * 0.5f;
-    const float btnRight = centerX + btnWidth * 0.5f;
+    const float hitX = centerX - hitW * 0.5f;
+    const float btnH = 67.f;
+    const float hyOff = (hitH - btnH) * 0.5f;  // 检测区居中偏移
 
-    if (mousePos.x > btnLeft && mousePos.x < btnRight) {
-        if (mousePos.y > 140 && mousePos.y < 190) {
+    const float btnY[4] = { 623.f, 760.f, 947.f, 1134.f };
+    const float btnOffX[4] = { -100.f, 0.f, 100.f, 240.f };
+    const float btnOffY[4] = { -50.f, 0.f, 0.f, 0.f };
+
+    // 遍历四个按钮
+    for (int i = 0; i < 4; ++i) {
+        float bx = hitX + btnOffX[i];
+        float by = btnY[i] - hyOff + btnOffY[i];
+        if (mousePos.x > bx && mousePos.x < bx + hitW &&
+            mousePos.y > by && mousePos.y < by + hitH) {
+            switch (i) {
+            case 0: // 认输放弃
+                winReason = (currentTurn == 1) ? L"黑方认输，白方获胜！" : L"白方认输，黑方获胜！";
+                isGameOver = true;
+                isPaused = false; pauseFadeClock.restart();
+                currentState = GameState::GAME_OVER;
+                break;
+            case 1: // 重开一局
+                chessboard.reset();
+                newCardJustDrawn = false;
+                handSlotAssign.clear();
+                attachedCardIndex = -1;
+                isCardAttachedToMouse = false;
+                isBusyAnimating = false;
+                isSelectingPiece = false;
+                selectPieceStep = 0;
+                pendingDestroys.clear();
+                isBulkDestroying = false;
+                isReturningHandToDeck = false;
+                if (newCardSprite) newCardSprite->setPosition({2260.f, 160.f});
+                battleMusic.stop();
+                battleMusic.play();
+                battleMusic02.stop();
+                battleMusicState = BattleMusicState::NORMAL;
+                battleMusic.setVolume(BATTLE_VOLUME);
+                winMusic.stop();
+                playerDeck.resetDeck();
+            memset(infected, 0, sizeof(infected)); memset(infectionActive, 0, sizeof(infectionActive)); quarantineTimer = -1; plagueOwner = 0;
+            aiCardPlayState = AICardPlayState::IDLE; aiPlayingCardIndex = -1;
+                currentTurn = 1;
+                initActionPointsForTurn();
+                showcaseState = CardShowcaseState::NONE;
+                isAiThinking = false;
+                isGameOver = false;
+                savedThisGame = false;
+                isPaused = false; pauseFadeClock.restart();
+                turnClock.restart();
+                turnTimePaused = 0.f;
+                isTurnPaused = false;
+                if (currentState == GameState::GAME_PVE && playerColorPref == 2) {
+                    isAiThinking = true;
+                    aiThinkClock.restart();
+                }
+                break;
+            case 2: // 返回主页
+                battleMusic.stop();
+                battleMusic02.stop();
+                battleMusicState = BattleMusicState::NORMAL;
+                winMusic.stop();
+                failMusic.stop();
+                isPaused = false; pauseFadeClock.restart();
+                isBusyAnimating = false;
+                isSelectingPiece = false;
+                selectPieceStep = 0;
+                showcaseState = CardShowcaseState::NONE;
+                annihilateState = CardAnnihilateState::NONE;
+                isCardAttachedToMouse = false;
+                attachedCardIndex = -1;
+                handSlotAssign.clear();
+                currentTurnActionPoints.clear();
+                if (newCardSprite) newCardSprite->setPosition({2260.f, 160.f});
+                currentState = GameState::MENU;
+                break;
+            case 3: // 退出游戏
+                window.close();
+                break;
+            }
+            return;
+        }
+    }
+}
+
+void GameEngine::handleSettingsClick(sf::Vector2i mousePos) {
+    // 与主菜单一致的检测区：宽 320×1.1=352, 高 67×1.8=120.6
+    const float centerX = WINDOW_WIDTH * 0.5f;
+    const float hitWidth  = 320.f * 1.1f;
+    const float hitHeight = 67.f * 1.8f;
+    const float hitX = centerX - hitWidth * 0.5f;
+    const float hitRX = centerX + hitWidth * 0.5f;
+    const float menuStartY = 543.f;
+    const float spacing = 137.f;
+
+    if (mousePos.x > hitX && mousePos.x < hitRX) {
+        if (mousePos.y > menuStartY && mousePos.y < menuStartY + hitHeight) {
             isProfessionalMode = !isProfessionalMode;
             std::cout << "[Info] Professional mode: " << (isProfessionalMode ? "ON" : "OFF") << std::endl;
         }
-        else if (mousePos.y > 210 && mousePos.y < 260) {
+        else if (mousePos.y > menuStartY + spacing && mousePos.y < menuStartY + spacing + hitHeight) {
             toggleFullscreen();
         }
-    }
-    if (mousePos.x > btnLeft && mousePos.x < btnRight && mousePos.y > 410 && mousePos.y < 460) {
-        currentState = GameState::MENU;
+        else if (mousePos.y > menuStartY + spacing * 2 && mousePos.y < menuStartY + spacing * 2 + hitHeight) {
+            currentState = GameState::MENU;
+        }
     }
 }
 
@@ -998,6 +1157,16 @@ void GameEngine::handleHistoryClick(sf::Vector2i mousePos) {
 }
 
 void GameEngine::update() {
+    // ── 疫病系统：每回合开始时处理 ──
+    {
+        static int lastProcessedTurn = -1;
+        if ((currentState == GameState::GAME_PVP || currentState == GameState::GAME_PVE) &&
+            currentTurn != lastProcessedTurn && !isGameOver) {
+            lastProcessedTurn = currentTurn;
+            processInfection();
+        }
+    }
+
     // 🌟 画中画淡入淡出（首1s淡入，末0.5s淡出）
     {
         float ft = pipFadeClock.getElapsedTime().asSeconds();
@@ -1059,7 +1228,10 @@ void GameEngine::update() {
 
     // 🌟【全状态音频状态机】：完美互斥控制所有 5 首 BGM 的播放
 
-    if (currentState == GameState::MENU) {
+    if (currentState == GameState::MENU ||
+        currentState == GameState::SETTINGS ||
+        currentState == GameState::HELP ||
+        currentState == GameState::HISTORY) {
         if (static_cast<int>(menuMusic.getStatus()) != 2) menuMusic.play();
         if (static_cast<int>(configMusic.getStatus()) == 2) configMusic.stop();
         if (static_cast<int>(battleMusic.getStatus()) == 2) battleMusic.stop();
@@ -1262,15 +1434,36 @@ void GameEngine::update() {
             chessboard.placePieceByAI(ar, ac, 0, ar, ac);
             chessboard.recordMove(ar, ac, 0);
             chessboard.finishPieceAnim();
-            isBusyAnimating = false;
-            handled = true;
             std::cout << "[Convert] 销毁完成。" << std::endl;
+            // AI 自动进入转化阶段
+            if (currentState == GameState::GAME_PVE && currentTurn != playerColorPref && aiPlayer) {
+                auto enemy = aiPlayer->chooseEnemyPieceToConvert(chessboard);
+                if (enemy.first >= 0) {
+                    chessboard.startConvertAnim(enemy.first, enemy.second,
+                        (selectPiecePlayer == 1) ? 2 : 1, selectPiecePlayer);
+                    isBusyAnimating = true;
+                    selectPieceStep = 3;
+                    std::cout << "[AI] 笼络自动选敌方: (" << enemy.first << "," << enemy.second << ")" << std::endl;
+                } else {
+                    isBusyAnimating = false;
+                    isSelectingPiece = false;
+                }
+            } else {
+                isBusyAnimating = false;
+            }
+            handled = true;
         } else if (selectPieceStep == 3) {
             chessboard.placePieceByAI(ar, ac, selectPiecePlayer, ar, ac);
             chessboard.recordMove(ar, ac, selectPiecePlayer);
             chessboard.finishPieceAnim();
             selectPieceStep = 0;
+            isSelectingPiece = false;
             isBusyAnimating = false;
+            // 若 AI 笼络在 SHOWCASING 期间完成，清理残留状态
+            if (aiCardPlayState == AICardPlayState::SHOWCASING) {
+                aiCardPlayState = AICardPlayState::IDLE;
+            }
+            isAiThinking = false;
             if (isTurnPaused) {
                 turnTimePaused += pauseClock.getElapsedTime().asSeconds();
                 isTurnPaused = false;
@@ -1291,6 +1484,11 @@ void GameEngine::update() {
         }
     }
 
+    // 暂停时冻结对局进程
+    if (isPaused && (currentState == GameState::GAME_PVP || currentState == GameState::GAME_PVE)) {
+        return;
+    }
+
     float elapsedSeconds = getEffectiveTurnTime();
     if (elapsedSeconds >= 45.f) {
         winReason = (currentTurn == 1) ? L"黑方思考超时，白方获胜！" : L"白方思考超时，黑方获胜！";
@@ -1299,8 +1497,45 @@ void GameEngine::update() {
         return;
     }
 
+    // 紫卡传送动画驱动
+    if (purpleSendState != PurpleSendState::IDLE) {
+        updatePurpleCardSend();
+    }
+
+    // ── AI 回合状态机 ──
     if (currentState == GameState::GAME_PVE && currentTurn != playerColorPref) {
-        // 🔒 卡牌动画期间暂停 AI（不开始新思考，也不落子）
+        // ── AI 疫病自动选子 ──
+        if (isSelectingPiece && selectPieceStep == 10 && aiPlayer) {
+            auto enemy = aiPlayer->chooseEnemyPieceToConvert(chessboard);
+            if (enemy.first >= 0) {
+                infected[enemy.first][enemy.second] = true; infectionActive[enemy.first][enemy.second] = false;
+                plagueOwner = currentTurn;
+                isSelectingPiece = false;
+                selectPieceStep = 0;
+                std::cout << "[AI] 疫病自动感染: (" << enemy.first << "," << enemy.second << ")" << std::endl;
+            }
+            return;
+        }
+
+        // ── AI 笼络自动选子（优先于卡片动画）──
+        if (isSelectingPiece && selectPieceStep == 1 && aiPlayer) {
+            auto own = aiPlayer->chooseOwnPieceToSacrifice(chessboard);
+            if (own.first >= 0) {
+                chessboard.startDestroyAnim(own.first, own.second);
+                isBusyAnimating = true;
+                selectPieceStep = 2;
+                std::cout << "[AI] 笼络自动选己方: (" << own.first << "," << own.second << ")" << std::endl;
+            }
+            return;
+        }
+
+        // AI 出牌动画驱动（即使 isBusyAnimating 也需运行）
+        if (aiCardPlayState != AICardPlayState::IDLE) {
+            updateAICardAnimation();
+            return;
+        }
+
+        // 动画进行中则暂停 AI 决策
         if (isBusyAnimating) return;
 
         if (!aiPlayer) {
@@ -1314,37 +1549,90 @@ void GameEngine::update() {
             aiThinkClock.restart();
         }
 
-        if (aiThinkClock.getElapsedTime().asSeconds() >= 0.8f) {
-            auto move = aiPlayer->calculateBestMove(chessboard);
-            int aiRow = move.first;
-            int aiCol = move.second;
+        // 等待思考时间
+        if (aiThinkClock.getElapsedTime().asSeconds() < 0.8f) return;
 
-            if (aiRow >= 0 && aiRow < 15 && aiCol >= 0 && aiCol < 15) {
-                chessboard.placePieceByAI(aiRow, aiCol, currentTurn, aiRow, aiCol);
-
-                if (dropSound) {
-                    dropSound->play();
-                    std::cout << "[Audio] AI Drop sound played." << std::endl;
-                }
-
-                chessboard.recordMove(aiRow, aiCol, currentTurn);
-                isAiThinking = false;
-
-                if (chessboard.checkWin(aiRow, aiCol)) {
-                    winReason = L"AI 计算完美，白方获胜！"; // 🌟 这里包含了“获胜！”而不是简单的“胜”
-                    isGameOver = true;
-                    currentState = GameState::GAME_OVER; // 🌟 触发游戏结束状态
-                    std::cout << "[Info] AI wins at (" << aiRow << "," << aiCol << ")" << std::endl;
-                } else {
-                    currentTurn = playerColorPref;
-                    turnClock.restart();
-                }
-            } else {
-                std::cerr << "[Error] AI returned invalid move (" << aiRow << "," << aiCol << ")." << std::endl;
-                isAiThinking = false;
-                currentTurn = playerColorPref;
-                turnClock.restart();
+        // ── 决策：先出牌再下棋？──
+        bool hasCardAP = hasValidActionPoint(false);
+        if (hasCardAP && !playerDeck.aiHand.empty() &&
+            aiPlayer->shouldPlayCard(playerDeck.aiHand, chessboard, hasCardAP) &&
+            aiPlayer->shouldPlayBeforeDrop(playerDeck.aiHand, chessboard)) {
+            int idx = aiPlayer->chooseCardToPlay(playerDeck.aiHand, chessboard);
+            if (idx >= 0 && idx < static_cast<int>(playerDeck.aiHand.size())) {
+                startAICardPlay(idx);
+                return;
             }
+        }
+
+        // ── AI 下棋 ──
+        auto move = aiPlayer->calculateBestMove(chessboard);
+        int aiRow = move.first;
+        int aiCol = move.second;
+
+        if (aiRow >= 0 && aiRow < 15 && aiCol >= 0 && aiCol < 15) {
+            chessboard.placePieceByAI(aiRow, aiCol, currentTurn, aiRow, aiCol);
+            chessboard.startDropAnim(aiRow, aiCol, currentTurn);
+
+            if (dropSound) {
+                dropSound->play();
+                std::cout << "[Audio] AI Drop sound played." << std::endl;
+            }
+
+            chessboard.recordMove(aiRow, aiCol, currentTurn);
+            isAiThinking = false;
+
+            // 消耗行动点
+            consumeActionPoint(true);
+
+            // Pattern 检测 → AI 抽牌
+            int dir = -1;
+            int pattern = chessboard.checkPattern(aiRow, aiCol, dir);
+            if (pattern == 3 || pattern == 4) {
+                size_t aiBefore = playerDeck.aiHand.size();
+                playerDeck.drawCardForAI();
+                if (playerDeck.aiHand.size() > aiBefore) {
+                    chessboard.markPatternUsed(aiRow, aiCol, dir);
+                }
+                std::cout << "[AI] 达成 " << pattern << " 连，抽牌！AI手牌: " << playerDeck.aiHand.size() << std::endl;
+            }
+
+            // AI 四子连星不影响战斗音乐
+
+            // 胜利检测
+            if (chessboard.checkWin(aiRow, aiCol)) {
+                int aiColor = (playerColorPref == 1) ? 2 : 1;
+                winReason = (aiColor == 1) ? L"AI 计算完美，黑方获胜！" : L"AI 计算完美，白方获胜！";
+                isGameOver = true;
+                currentState = GameState::GAME_OVER;
+                std::cout << "[Info] AI wins at (" << aiRow << "," << aiCol << ")" << std::endl;
+                return;
+            }
+
+            // ── 决策：下棋后出牌？──
+            hasCardAP = hasValidActionPoint(false);
+            if (hasCardAP && !playerDeck.aiHand.empty() &&
+                aiPlayer->shouldPlayCard(playerDeck.aiHand, chessboard, hasCardAP)) {
+                int idx = aiPlayer->chooseCardToPlay(playerDeck.aiHand, chessboard);
+                if (idx >= 0 && idx < static_cast<int>(playerDeck.aiHand.size())) {
+                    startAICardPlay(idx);
+                    return;
+                }
+            }
+
+            // 结算行动点
+            settleActionPoints();
+
+            // FORCE_DROP 场景：AP 未耗尽，AI 继续回合
+            if (currentState == GameState::GAME_PVE && currentTurn != playerColorPref) {
+                isAiThinking = true;
+                aiThinkClock.restart();
+                std::cout << "[AI] 仍有行动点，继续回合" << std::endl;
+            }
+        } else {
+            std::cerr << "[Error] AI returned invalid move (" << aiRow << "," << aiCol << ")." << std::endl;
+            isAiThinking = false;
+            currentTurn = playerColorPref;
+            turnClock.restart();
         }
     }
 
@@ -1433,17 +1721,25 @@ void GameEngine::render() {
 
 void GameEngine::renderMenu() {
     // ── 第 0 层：星空帧动画背景（25fps, 播完循环）──
-    float bgElapsed = bgFrameClock.getElapsedTime().asSeconds();
-    int frame = static_cast<int>(bgElapsed * 25.f) % BG_TOTAL_FRAMES + 1;
-    char path[128]; snprintf(path, sizeof(path),
-        "assets/Universe/frame_%05d.jpg", frame);
-    if (bgTexA.loadFromFile(getEngineAssetPath(path))) {
-        bgSprA.setTexture(bgTexA, true);
-        float sw = 2560.f / bgTexA.getSize().x;
-        float sh = 1440.f / bgTexA.getSize().y;
-        bgSprA.setScale({sw, sh});
-        bgSprA.setPosition({0.f, 0.f});
-        bgSprA.setColor(sf::Color(255, 255, 255, 255));
+    // ── Universe 背景（本界面独立加载，每帧缓存）──
+    {
+        static GameState lastBgState = GameState::MENU;
+        if (currentState != lastBgState) { bgCurrentFrame = -1; lastBgState = currentState; }
+        float bgElapsed = bgFrameClock.getElapsedTime().asSeconds();
+        int frame = static_cast<int>(bgElapsed * 25.f) % BG_TOTAL_FRAMES + 1;
+        if (frame != bgCurrentFrame) {
+            char path[128]; snprintf(path, sizeof(path),
+                "assets/Universe/frame_%05d.jpg", frame);
+            if (bgTexA.loadFromFile(getEngineAssetPath(path))) {
+                bgSprA.setTexture(bgTexA, true);
+                float sw = 2560.f / bgTexA.getSize().x;
+                float sh = 1440.f / bgTexA.getSize().y;
+                bgSprA.setScale({sw, sh});
+                bgSprA.setPosition({0.f, 0.f});
+                bgSprA.setColor(sf::Color(255, 255, 255, 255));
+            }
+            bgCurrentFrame = frame;
+        }
         window.draw(bgSprA);
     }
 
@@ -1683,6 +1979,80 @@ void GameEngine::renderMenu() {
         newCardSprite->setScale({0.36f, 0.36f});
         pipRT.setView(pipView);
     }
+    // ──── 动画 3：疫病传播演示 ────
+    else if (pipAnimIndex == 3) {
+        pipTotalDur = 10.f;
+        // 预定义棋盘状态
+        struct Step { float t; int r; int c; int action; }; // action: 0=放白子, 1=感染, 2=销毁, 3=结束
+        static const Step steps[] = {
+            // 初始布置白子方阵 (行1-4, 列1-5)
+            {0.0f, 1,1,0}, {0.0f, 1,2,0}, {0.0f, 1,3,0}, {0.0f, 1,4,0}, {0.0f, 1,5,0},
+            {0.0f, 2,1,0}, {0.0f, 2,2,0}, {0.0f, 2,3,0}, {0.0f, 2,4,0}, {0.0f, 2,5,0},
+            {0.0f, 3,1,0}, {0.0f, 3,2,0}, {0.0f, 3,3,0}, {0.0f, 3,4,0}, {0.0f, 3,5,0},
+            {0.0f, 4,1,0}, {0.0f, 4,2,0}, {0.0f, 4,3,0}, {0.0f, 4,4,0}, {0.0f, 4,5,0},
+            // 初始感染 (2,3)
+            {1.5f, 2,3,1},
+            // 回合1：感染源死亡 + 四邻感染
+            {3.0f, 2,3,2}, {3.0f, 1,3,1}, {3.0f, 3,3,1}, {3.0f, 2,2,1}, {3.0f, 2,4,1},
+            // 回合2：两个感染棋子死亡 + 更多传播
+            {5.0f, 1,3,2}, {5.0f, 2,2,2}, {5.0f, 1,2,1}, {5.0f, 1,4,1}, {5.0f, 3,2,1},
+            {6.5f, 3,3,2},
+        };
+        const int stepCount = sizeof(steps) / sizeof(steps[0]);
+
+        if (pipAnimState == 0) {
+            chessboard.reset();
+            memset(infected, 0, sizeof(infected));
+            pipAnimState = 1;
+        }
+
+        // 执行步骤（按时间顺序逐个触发）
+        for (int i = pipAnimState - 1; i < stepCount; ++i) {
+            if (dt >= steps[i].t) {
+                if (steps[i].action == 0)
+                    chessboard.placeDirect(steps[i].r, steps[i].c, 2);
+                else if (steps[i].action == 1)
+                    infected[steps[i].r][steps[i].c] = true;
+                else if (steps[i].action == 2) {
+                    chessboard.placeDirect(steps[i].r, steps[i].c, 0);
+                    infected[steps[i].r][steps[i].c] = false;
+                }
+            } else break;
+        }
+        // pipAnimState 追踪已执行的步骤数
+        int executed = 0;
+        for (int i = 0; i < stepCount; ++i)
+            if (dt >= steps[i].t) ++executed;
+        pipAnimState = executed + 1;
+        // 全部完成且停留时间足够后切换
+        if (executed >= stepCount && dt >= 10.f && pipAnimState < 999) {
+            pipAnimState = 999; // 防止重复触发
+            pipAnimNext();
+        }
+
+        // 绘制棋盘（放大局部视角，保持 16:9）
+        sf::View boardView(sf::FloatRect({-200.f, -150.f}, {1600.f, 900.f}));
+        pipRT.setView(boardView);
+        chessboard.draw(pipRT);
+
+        // 绘制疫病标记
+        if (virusTex.getSize().x > 0) {
+            for (int r = 0; r < 15; ++r) {
+                for (int c = 0; c < 15; ++c) {
+                    if (!infected[r][c]) continue;
+                    float ix, iy;
+                    chessboard.getGridPosition(r, c, ix, iy);
+                    float vs = 18.f / virusTex.getSize().x;
+                    virusSpr.setScale({vs, vs});
+                    virusSpr.setPosition({ix + 16.f, iy - 16.f});
+                    virusSpr.setColor(sf::Color(255, 255, 255, 220));
+                    pipRT.draw(virusSpr);
+                }
+            }
+        }
+
+        pipRT.setView(pipView);
+    }
     pipRT.display();
     pipSpr->setTexture(pipRT.getTexture(), true);
     pipSpr->setOrigin({pipRT.getSize().x / 2.f, pipRT.getSize().y / 2.f});
@@ -1741,6 +2111,7 @@ void GameEngine::renderMenu() {
         float hy = hover ? jy : 0.f;
         uiFrameSpr.setScale({s, s});
         uiFrameSpr.setPosition({bpos.x + bsize.x / 2.f - ox + hx, bpos.y + bsize.y / 2.f + oy + hy});
+        uiFrameSpr.setColor(sf::Color(255, 255, 255, 255));
         window.draw(uiFrameSpr);
     }
     for (auto& bg : menuButtonBackgrounds) window.draw(bg);  // 透明定位层
@@ -1767,7 +2138,7 @@ void GameEngine::renderMenu() {
         const float halfW = cardW / 2.f, halfH = cardH / 2.f;
 
         float a = glitchAngle;
-        sf::Vector2f longAxis(std::sin(a), -std::cos(a));   // 位移轴（竖边）
+        sf::Vector2f longAxis(std::sin(a), -std::cos(a));
         sf::Vector2f mouseDelta = mpos2 - glitchPrevMouse;
 
         if (sf::Mouse::isButtonPressed(sf::Mouse::Button::Left)) {
@@ -1775,7 +2146,6 @@ void GameEngine::renderMenu() {
             if (!glitchDragging && cardRect.contains(mpos2)) {
                 glitchDragging = true;
                 grabPoint = mpos2;
-                // 本地偏移 = 抓取点相对卡片中心的矢量，转到当前角度的本地空间
                 sf::Vector2f worldOff = grabPoint - glitchCardPos;
                 float ca = std::cos(-glitchAngle), sa = std::sin(-glitchAngle);
                 grabOffset.x = worldOff.x * ca - worldOff.y * sa;
@@ -1785,22 +2155,26 @@ void GameEngine::renderMenu() {
                 lastMouseDir = {0, 0};
             }
             if (glitchDragging) {
-                // ── 位移：抓取点跟随鼠标 ──
                 float ca2 = std::cos(glitchAngle), sa2 = std::sin(glitchAngle);
                 sf::Vector2f rotatedOffset;
                 rotatedOffset.x = grabOffset.x * ca2 - grabOffset.y * sa2;
                 rotatedOffset.y = grabOffset.x * sa2 + grabOffset.y * ca2;
                 glitchCardPos = mpos2 - rotatedOffset;
 
-                // ── 旋转：长轴追鼠标最后有效方向 ──
                 float angleDiff = 0.f, rotSpeed = 0.f;
                 float mdLen = std::sqrt(mouseDelta.x * mouseDelta.x + mouseDelta.y * mouseDelta.y);
                 if (mdLen > 0.5f) {
-                    lastMouseDir.x = mouseDelta.x / mdLen;
-                    lastMouseDir.y = mouseDelta.y / mdLen;
+                    // 指数移动平均平滑鼠标方向，抑制单帧抖动
+                    sf::Vector2f rawDir(mouseDelta.x / mdLen, mouseDelta.y / mdLen);
+                    const float SMOOTH = 0.35f;
+                    if (lastMouseDir.x == 0.f && lastMouseDir.y == 0.f) {
+                        lastMouseDir = rawDir;  // 首帧直接采纳
+                    } else {
+                        lastMouseDir.x = lastMouseDir.x + (rawDir.x - lastMouseDir.x) * SMOOTH;
+                        lastMouseDir.y = lastMouseDir.y + (rawDir.y - lastMouseDir.y) * SMOOTH;
+                    }
                 }
                 if (lastMouseDir.x != 0.f || lastMouseDir.y != 0.f) {
-                    // 抓下方时，长轴应追 -mouseDir（反方向），维持负反馈
                     float sideFlip = (grabOffset.y > 0.f) ? -1.f : 1.f;
                     float cross = longAxis.x * lastMouseDir.y * sideFlip - longAxis.y * lastMouseDir.x * sideFlip;
                     float dot   = longAxis.x * lastMouseDir.x * sideFlip + longAxis.y * lastMouseDir.y * sideFlip;
@@ -1808,60 +2182,60 @@ void GameEngine::renderMenu() {
                     float leverDist = std::sqrt(grabOffset.x * grabOffset.x + grabOffset.y * grabOffset.y);
                     rotSpeed = leverDist / (halfH * 1.5f);
                     if (rotSpeed > 1.f) rotSpeed = 1.f;
-                    glitchAngle += angleDiff * rotSpeed * 0.25f;
+                    glitchAngle += angleDiff * rotSpeed * 0.20f;
                 }
 
-                // ── 边界 ──
                 if (glitchCardPos.x < halfW)      glitchCardPos.x = halfW;
                 if (glitchCardPos.x > 2560-halfW) glitchCardPos.x = 2560-halfW;
                 if (glitchCardPos.y < halfH)      glitchCardPos.y = halfH;
                 if (glitchCardPos.y > 1440-halfH) glitchCardPos.y = 1440-halfH;
 
-                // ── 释放动量 ──
                 glitchVelocity = mouseDelta;
                 glitchAngularVel = angleDiff * rotSpeed * 0.5f;
             }
         } else {
             if (glitchDragging) { glitchDragging = false; }
-            // 线性动量
             glitchCardPos += glitchVelocity;
-            // 角动量
             glitchAngle += glitchAngularVel;
-            // 边界反弹
             if (glitchCardPos.x - halfW < 0.f)     { glitchCardPos.x = halfW;      glitchVelocity.x = -glitchVelocity.x * 0.6f; glitchVelocity.y *= 0.8f; }
             if (glitchCardPos.x + halfW > 2560.f)  { glitchCardPos.x = 2560.f-halfW; glitchVelocity.x = -glitchVelocity.x * 0.6f; glitchVelocity.y *= 0.8f; }
             if (glitchCardPos.y - halfH < 0.f)     { glitchCardPos.y = halfH;      glitchVelocity.y = -glitchVelocity.y * 0.6f; glitchVelocity.x *= 0.8f; }
             if (glitchCardPos.y + halfH > 1440.f)  { glitchCardPos.y = 1440.f-halfH; glitchVelocity.y = -glitchVelocity.y * 0.6f; glitchVelocity.x *= 0.8f; }
-            // 衰减
-            glitchVelocity *= 0.92f;
-            glitchAngularVel *= 0.96f;
+            glitchVelocity *= 0.97f;
+            glitchAngularVel *= 0.98f;
             if (std::abs(glitchVelocity.x) < 0.1f && std::abs(glitchVelocity.y) < 0.1f) glitchVelocity = {0,0};
             if (std::abs(glitchAngularVel) < 0.0001f) glitchAngularVel = 0;
         }
         glitchPrevMouse = mpos2;
 
-        // 渲染卡片（带旋转）
-        sf::Vector2u ct3 = newCardTexture.getSize();
-        newCardSprite->setScale({0.432f, 0.432f});
-        newCardSprite->setPosition(glitchCardPos);
-        newCardSprite->setRotation(sf::radians(glitchAngle));
-        newCardSprite->setTextureRect(sf::IntRect({0,0}, {(int)ct3.x, (int)ct3.y}));
-        newCardSprite->setColor(sf::Color(255,255,255,255));
-        window.draw(*newCardSprite);
-        newCardSprite->setRotation(sf::degrees(0));  // 重置，不影响游戏渲染
+        // 渲染位置平滑追赶物理位置（提高视觉帧率）
+        glitchRenderPos.x += (glitchCardPos.x - glitchRenderPos.x) * 0.45f;
+        glitchRenderPos.y += (glitchCardPos.y - glitchRenderPos.y) * 0.45f;
 
-        // 乱码文字（不旋转，始终跟随卡片中心）
-        const std::wstring pool = L"连击给两次数落子隐忍迫使敌为胜途方承六星受笼络销毁己一个棋转化破釜沉舟将手牌放回库根据量";
+        // 乱码文字刷新
+        const std::wstring pool = L"连击给两次数落子隐忍迫使敌为胜途方承六星受笼络销毁己一个棋转化破釜沉舟将手牌放回库根据量疫病指定颗患上概率死亡试图传染给其他也风险隔离在后痊愈";
         int poolSize = (int)pool.size();
         if (menuGlitchClock.getElapsedTime().asSeconds() >= 0.08f) {
             for (auto& c : glitchName) c = pool[rand() % poolSize];
             for (auto& c : glitchDesc) if (c != L'\n') c = pool[rand() % poolSize];
             menuGlitchClock.restart();
         }
+
+        // 渲染卡片（带旋转，位置用插值平滑坐标）
+        sf::Vector2u ct3 = newCardTexture.getSize();
+        newCardSprite->setScale({0.432f, 0.432f});
+        newCardSprite->setPosition(glitchRenderPos);
+        newCardSprite->setRotation(sf::radians(glitchAngle));
+        newCardSprite->setTextureRect(sf::IntRect({0,0}, {(int)ct3.x, (int)ct3.y}));
+        newCardSprite->setColor(sf::Color(255,255,255,255));
+        window.draw(*newCardSprite);
+        newCardSprite->setRotation(sf::degrees(0));  // 重置
+
+        // 乱码文字（跟随渲染位置）
         float gs = 0.432f / 0.36f;
-        float cx = glitchCardPos.x, cy = glitchCardPos.y;
+        float cx = glitchRenderPos.x, cy = glitchRenderPos.y;
         sf::Transform rotTx;
-        rotTx.rotate(sf::radians(glitchAngle), glitchCardPos);
+        rotTx.rotate(sf::radians(glitchAngle), glitchRenderPos);
 
         uiText.setFont(cardFont);
         uiText.setCharacterSize((int)(28.f * gs));
@@ -1883,63 +2257,347 @@ void GameEngine::renderMenu() {
 }
 
 void GameEngine::renderPVEConfig() {
-    const float centerX = WINDOW_WIDTH * 0.5f;
-    const float buttonWidth = 400.f;
-    const float buttonX = centerX - buttonWidth * 0.5f;
+    // ── 背景：星空帧动画（与主菜单一致）──
+    // ── Universe 背景（本界面独立加载，每帧缓存）──
+    {
+        static GameState lastBgState = GameState::MENU;
+        if (currentState != lastBgState) { bgCurrentFrame = -1; lastBgState = currentState; }
+        float bgElapsed = bgFrameClock.getElapsedTime().asSeconds();
+        int frame = static_cast<int>(bgElapsed * 25.f) % BG_TOTAL_FRAMES + 1;
+        if (frame != bgCurrentFrame) {
+            char path[128]; snprintf(path, sizeof(path),
+                "assets/Universe/frame_%05d.jpg", frame);
+            if (bgTexA.loadFromFile(getEngineAssetPath(path))) {
+                bgSprA.setTexture(bgTexA, true);
+                float sw = 2560.f / bgTexA.getSize().x;
+                float sh = 1440.f / bgTexA.getSize().y;
+                bgSprA.setScale({sw, sh});
+                bgSprA.setPosition({0.f, 0.f});
+                bgSprA.setColor(sf::Color(255, 255, 255, 255));
+            }
+            bgCurrentFrame = frame;
+        }
+        window.draw(bgSprA);
+    }
 
-    uiText.setCharacterSize(48);
-    uiText.setFillColor(sf::Color(100, 60, 30));
+    // ── 按钮参数（与主菜单一致）──
+    const float centerX = WINDOW_WIDTH * 0.5f;
+    const float btnW = 320.f;
+    const float btnH = 67.f;
+    const float hitW = btnW * 1.1f;
+    const float hitH = btnH * 1.8f;
+    const float btnX = centerX - btnW * 0.5f;
+    const float hitX = centerX - hitW * 0.5f;
+    const float menuStartY = 543.f;
+
+    // 四个按钮的 Y 坐标（间距 137）
+    const float btnY[4] = { menuStartY, menuStartY + 137.f, menuStartY + 274.f, menuStartY + 411.f };
+    const std::wstring btnLabels[4] = {
+        (aiDifficultySetting == 1) ? L"AI难度:初级" :
+        (aiDifficultySetting == 2) ? L"AI难度:明智" :
+                                     L"AI难度:大神",
+        (playerColorPref == 1) ? L"执子:执黑" : L"执子:执白",
+        L"进入游戏",
+        L"返回主菜单"
+    };
+
+    // ── 标题 ──
+    uiText.setFont(cardFont);
+    uiText.setCharacterSize(78);
+    uiText.setFillColor(sf::Color(200, 160, 230));
     uiText.setString(sf::String(L"对战配置"));
     sf::FloatRect titleBounds = uiText.getLocalBounds();
-    uiText.setPosition(sf::Vector2f(centerX - (titleBounds.position.x + titleBounds.size.x) * 0.5f, 50.f));
+    uiText.setPosition(sf::Vector2f(centerX - (titleBounds.position.x + titleBounds.size.x) * 0.5f, 380.f));
     window.draw(uiText);
 
-    sf::RectangleShape btn1({buttonWidth, 50.f});
-    btn1.setPosition({buttonX, 140.f});
-    btn1.setFillColor(sf::Color(218, 171, 118));
-    window.draw(btn1);
-
-    uiText.setCharacterSize(36);
-    uiText.setFillColor(sf::Color(60, 40, 20));
-
-    std::wstring diffText;
-    switch (aiDifficultySetting) {
-        case 1: diffText = L"当前AI难度 ： 初级"; break;
-        case 2: diffText = L"当前AI难度 ： 明智"; break;
-        case 3: diffText = L"当前AI难度 ： 大神"; break;
-        default: diffText = L"当前AI难度 ： 未知"; break;
+    // ── 悬停检测 ──
+    sf::Vector2i mp = sf::Mouse::getPosition(window);
+    sf::Vector2f mpos = window.mapPixelToCoords(mp);
+    int hoverIdx = -1;
+    for (int i = 0; i < 4; ++i) {
+        float hy = btnY[i] - (hitH - btnH) * 0.5f;
+        if (mpos.x > hitX && mpos.x < hitX + hitW && mpos.y > hy && mpos.y < hy + hitH)
+            { hoverIdx = i; break; }
     }
-    uiText.setString(sf::String(diffText));
-    sf::FloatRect diffBounds = uiText.getLocalBounds();
-    uiText.setPosition(sf::Vector2f(centerX - (diffBounds.position.x + diffBounds.size.x) * 0.5f, 150.f));
-    window.draw(uiText);
+    float jx = 0.f, jy = 0.f;
+    if (hoverIdx >= 0 && menuJitterClock.getElapsedTime().asSeconds() >= 1.f / 60.f) {
+        jx = (static_cast<float>(rand()) / RAND_MAX * 2.f - 1.f);
+        jy = (static_cast<float>(rand()) / RAND_MAX * 2.f - 1.f);
+        menuJitterClock.restart();
+    }
 
-    sf::RectangleShape btn2({buttonWidth, 50.f});
-    btn2.setPosition({buttonX, 210.f});
-    btn2.setFillColor(sf::Color(218, 171, 118));
-    window.draw(btn2);
+    // ── UI_Frame 按钮背景 ──
+    float ffw = static_cast<float>(uiFrameTex.getSize().x);
+    float ffh = static_cast<float>(uiFrameTex.getSize().y);
+    float frameScale = 120.6f / ffh;
+    for (int i = 0; i < 4; ++i) {
+        float by = btnY[i] - (hitH - btnH) * 0.5f;       // 检测矩形顶端
+        sf::Vector2f bpos(hitX, by);
+        sf::Vector2f bsize(hitW, hitH);
+        bool hover = (i == hoverIdx);
+        float s = hover ? frameScale * 1.05f : frameScale;
+        float ox = hover ? 10.f : 0.f;
+        float oy = hover ? -10.f : 0.f;
+        float hx = hover ? jx : 0.f;
+        float hy2 = hover ? jy : 0.f;
+        uiFrameSpr.setScale({s, s});
+        uiFrameSpr.setPosition({bpos.x + bsize.x / 2.f - ox + hx, bpos.y + bsize.y / 2.f + oy + hy2});
+        uiFrameSpr.setColor(sf::Color(255, 255, 255, 255));
+        window.draw(uiFrameSpr);
+    }
 
-    std::wstring colorText = (playerColorPref == 1) ? L"执子选择 ： 玩家执黑" : L"执子选择 ： 玩家执白";
-    uiText.setString(sf::String(colorText));
-    sf::FloatRect colorBounds = uiText.getLocalBounds();
-    uiText.setPosition(sf::Vector2f(centerX - (colorBounds.position.x + colorBounds.size.x) * 0.5f, 220.f));
-    window.draw(uiText);
+    // ── 按钮文字 ──
+    uiText.setFont(cardFont);
+    uiText.setCharacterSize(48);
+    uiText.setFillColor(sf::Color(50, 15, 70));
+    for (int i = 0; i < 4; ++i) {
+        bool hover = (i == hoverIdx);
+        uiText.setString(sf::String(btnLabels[i]));
+        sf::FloatRect tb = uiText.getLocalBounds();
+        float tx = centerX - (tb.position.x + tb.size.x) * 0.5f;
+        float ty = btnY[i] + (btnH - tb.size.y) * 0.5f - tb.position.y;
+        if (hover) {
+            uiText.setCharacterSize(50);
+            uiText.setPosition({tx - 6.f + jx, ty - 10.f + jy});
+            window.draw(uiText);
+            uiText.setPosition({tx, ty});
+            uiText.setCharacterSize(48);
+        } else {
+            uiText.setPosition({tx, ty});
+            window.draw(uiText);
+        }
+    }
 
-    sf::RectangleShape btnStart({buttonWidth, 50.f});
-    btnStart.setPosition({buttonX, 350.f});
-    btnStart.setFillColor(sf::Color(214, 86, 43));
-    window.draw(btnStart);
+}
 
-    uiText.setFillColor(sf::Color::White);
-    uiText.setString(sf::String(L"进入游戏"));
-    sf::FloatRect startBounds = uiText.getLocalBounds();
-    uiText.setPosition(sf::Vector2f(centerX - (startBounds.position.x + startBounds.size.x) * 0.5f, 360.f));
-    window.draw(uiText);
+// ── AI 出牌动画 ──
+void GameEngine::startAICardPlay(int handIndex) {
+    if (handIndex < 0 || handIndex >= static_cast<int>(playerDeck.aiHand.size())) return;
+
+    showcasedCard = playerDeck.aiHand[handIndex];
+    aiPlayingCardIndex = handIndex;
+    aiCardPlayState = AICardPlayState::RISING;
+    aiCardPlayClock.restart();
+    aiCardAnimPos = {300.f, 1230.f};  // CardPortal 位置
+    isBusyAnimating = true;
+    isTurnPaused = true;
+    pauseClock.restart();
+    std::cout << "[AI] 开始出牌: " << showcasedCard.name.c_str() << std::endl;
+}
+
+void GameEngine::updateAICardAnimation() {
+    float elapsed = aiCardPlayClock.getElapsedTime().asSeconds();
+
+    switch (aiCardPlayState) {
+    case AICardPlayState::RISING: {
+        // 从 CardPortal(300,1230) 滑到 (300,720) — 与人族 MOVE_TO_200 同款缓动
+        float t = elapsed / 0.55f;
+        if (t > 1.f) t = 1.f;
+        float eased = t * t * (3.f - 2.f * t); // smoothstep（先快后慢）
+        aiCardAnimPos.x = 300.f;
+        aiCardAnimPos.y = 1230.f + (720.f - 1230.f) * eased;
+        if (t >= 1.f) {
+            aiCardPlayState = AICardPlayState::PAUSE_AT_CENTER;
+            aiCardPlayClock.restart();
+        }
+        break;
+    }
+    case AICardPlayState::PAUSE_AT_CENTER: {
+        // 停在 Y=720 展示 1 秒
+        aiCardAnimPos = {300.f, 720.f};
+        if (elapsed >= 1.0f) {
+            aiCardPlayState = AICardPlayState::TO_READER;
+            aiCardPlayClock.restart();
+        }
+        break;
+    }
+    case AICardPlayState::TO_READER: {
+        // 从 (300,720) 滑到 (300,400) — 与人族 MOVE_TO_200 同款缓动
+        float t = elapsed / 0.4f;
+        if (t > 1.f) t = 1.f;
+        float eased = t * t * (3.f - 2.f * t); // smoothstep
+        aiCardAnimPos.x = 300.f;
+        aiCardAnimPos.y = 720.f + (400.f - 720.f) * eased;
+        if (t >= 1.f) {
+            aiCardPlayState = AICardPlayState::ANNIHILATING;
+            aiCardPlayClock.restart();
+        }
+        break;
+    }
+    case AICardPlayState::ANNIHILATING: {
+        // 滑入 CardReader (300,400) → (300,210) — 与人族 MOVE_TO_ZERO 同款（0.35s smoothstep）
+        float t = elapsed / 0.35f;
+        if (t > 1.f) t = 1.f;
+        float eased = t * t * (3.f - 2.f * t); // smoothstep
+        aiCardAnimPos.x = 300.f;
+        aiCardAnimPos.y = 400.f + (210.f - 400.f) * eased;
+        if (t >= 1.f) {
+            // 进入展示阶段
+            playerDeck.aiDiscardCard(aiPlayingCardIndex);
+            aiPlayingCardIndex = -1;
+            showcaseState = CardShowcaseState::PAUSE;
+            showcaseClock.restart();
+            aiCardPlayState = AICardPlayState::SHOWCASING;
+            aiCardPlayClock.restart();
+        }
+        break;
+    }
+    case AICardPlayState::SHOWCASING: {
+        // 等待展示 + 延迟效果全部完成（计时由 FADE_OUT/deferred handler 管理）
+        if (showcaseState == CardShowcaseState::NONE && !isBusyAnimating) {
+            aiCardPlayState = AICardPlayState::IDLE;
+            std::cout << "[AI] 出牌动画完成" << std::endl;
+        }
+        break;
+    }
+    default: break;
+    }
+}
+
+// ── 紫卡传送动画 ──
+void GameEngine::startPurpleCardSend(int handIndex) {
+    if (handIndex < 0 || handIndex >= static_cast<int>(playerDeck.hand.size())) return;
+    purpleSendState = PurpleSendState::PAUSE_BEFORE;
+    purpleSendClock.restart();
+    purpleSendIndex = handIndex;
+    purpleSendPos = {300.f, 1060.f}; // snap 到 Portal 检测区中心
+    isBusyAnimating = true;
+    if (!isTurnPaused) { isTurnPaused = true; pauseClock.restart(); }
+    std::cout << "[PurpleSend] 紫卡传送启动" << std::endl;
+}
+
+void GameEngine::updatePurpleCardSend() {
+    float elapsed = purpleSendClock.getElapsedTime().asSeconds();
+    switch (purpleSendState) {
+    case PurpleSendState::PAUSE_BEFORE:
+        purpleSendPos = {300.f, 1060.f}; // 吸附在检测区中心
+        if (elapsed >= 0.2f) {
+            purpleSendState = PurpleSendState::MOVE_TO_PORTAL;
+            purpleSendClock.restart();
+        }
+        break;
+    case PurpleSendState::MOVE_TO_PORTAL: {
+        float t = elapsed / 0.35f;
+        if (t > 1.f) t = 1.f;
+        float eased = t * t * (3.f - 2.f * t); // smoothstep
+        purpleSendPos.x = 300.f;
+        purpleSendPos.y = 1060.f + (1230.f - 1060.f) * eased; // 下滑→Portal
+        if (t >= 1.f) {
+            // 传送完成：卡牌给敌方，立即清理
+            if (purpleSendIndex >= 0 && purpleSendIndex < static_cast<int>(playerDeck.hand.size())) {
+                Card sentCard = playerDeck.hand[purpleSendIndex];
+                playerDeck.hand.erase(playerDeck.hand.begin() + purpleSendIndex);
+                handSlotAssign.erase(handSlotAssign.begin() + purpleSendIndex);
+                playerDeck.aiHand.push_back(sentCard);
+                std::cout << "[PurpleSend] 紫卡已传送给敌方" << std::endl;
+            }
+            purpleSendState = PurpleSendState::IDLE;
+            purpleSendIndex = -1;
+            isBusyAnimating = false;
+            if (isTurnPaused) {
+                turnTimePaused += pauseClock.getElapsedTime().asSeconds();
+                isTurnPaused = false;
+            }
+            consumeActionPoint(false);
+            settleActionPoints();
+        }
+        break;
+    }
+    default: break;
+    }
 }
 
 void GameEngine::renderGameplay() {
+    // ── 背景：星空帧动画 ──
+    // ── Universe 背景（本界面独立加载，每帧缓存）──
+    {
+        static GameState lastBgState = GameState::MENU;
+        if (currentState != lastBgState) { bgCurrentFrame = -1; lastBgState = currentState; }
+        float bgElapsed = bgFrameClock.getElapsedTime().asSeconds();
+        int frame = static_cast<int>(bgElapsed * 25.f) % BG_TOTAL_FRAMES + 1;
+        if (frame != bgCurrentFrame) {
+            char path[128]; snprintf(path, sizeof(path),
+                "assets/Universe/frame_%05d.jpg", frame);
+            if (bgTexA.loadFromFile(getEngineAssetPath(path))) {
+                bgSprA.setTexture(bgTexA, true);
+                float sw = 2560.f / bgTexA.getSize().x;
+                float sh = 1440.f / bgTexA.getSize().y;
+                bgSprA.setScale({sw, sh});
+                bgSprA.setPosition({0.f, 0.f});
+                bgSprA.setColor(sf::Color(255, 255, 255, 255));
+            }
+            bgCurrentFrame = frame;
+        }
+        window.draw(bgSprA);
+    }
+
     // 1. 渲染棋盘
     chessboard.draw(window);
+
+    // 1.5 落子抛物线动画（棋盘之上、UI 之下）
+    chessboard.drawDropAnim(window);
+
+    // ── 疫病标记渲染（virus.png）──
+    if (virusTex.getSize().x > 0) {
+        for (int r = 0; r < 15; ++r) {
+            for (int c = 0; c < 15; ++c) {
+                if (!infected[r][c]) continue;
+                if (chessboard.getPiece(r, c) == 0) continue;
+                float ix, iy;
+                chessboard.getGridPosition(r, c, ix, iy);
+                float vScale = 24.f / virusTex.getSize().x;
+                virusSpr.setScale({vScale, vScale});
+                virusSpr.setPosition({ix + 22.f, iy - 22.f});
+                virusSpr.setColor(sf::Color(255, 255, 255, 220));
+                window.draw(virusSpr);
+            }
+        }
+    }
+
+    // ── 紫卡传送动画渲染 ──
+    if (purpleSendState != PurpleSendState::IDLE && purpleCardSprite &&
+        purpleSendIndex >= 0 && purpleSendIndex < static_cast<int>(playerDeck.hand.size())) {
+        sf::Vector2u ts = purpleCardTexture.getSize();
+        purpleCardSprite->setScale({0.36f, 0.36f});
+        purpleCardSprite->setPosition(purpleSendPos);
+        purpleCardSprite->setTextureRect(sf::IntRect({0,0}, {(int)ts.x, (int)ts.y}));
+        purpleCardSprite->setColor(sf::Color(255, 255, 255, 255));
+        window.draw(*purpleCardSprite);
+        // 卡牌文字
+        const auto& pc = playerDeck.hand[purpleSendIndex];
+        uiText.setFont(cardFont);
+        uiText.setCharacterSize(28);
+        uiText.setFillColor(sf::Color(255, 255, 255, 255));
+        uiText.setString(pc.name);
+        uiText.setPosition({purpleSendPos.x - 52.f, purpleSendPos.y - 164.f});
+        window.draw(uiText);
+        uiText.setCharacterSize(22);
+        uiText.setFillColor(sf::Color(230, 230, 230, 255));
+        uiText.setString(pc.description);
+        uiText.setPosition({purpleSendPos.x - 88.f, purpleSendPos.y - 90.f});
+        window.draw(uiText);
+        uiText.setFont(font);
+    }
+
+    // ── AI 出牌动画（CardPortal → Reader，SHOWCASING 时由展示接管）──
+    if (aiCardPlayState != AICardPlayState::IDLE &&
+        aiCardPlayState != AICardPlayState::SHOWCASING && newCardSprite) {
+        sf::Vector2u ts = newCardTexture.getSize();
+        newCardSprite->setScale({0.36f, 0.36f});
+        newCardSprite->setPosition(aiCardAnimPos);
+        newCardSprite->setTextureRect(sf::IntRect({0,0}, {(int)ts.x, (int)ts.y}));
+        newCardSprite->setColor(sf::Color(255, 255, 255, 255));
+        window.draw(*newCardSprite);
+
+        // 卡牌文字
+        uiText.setFont(cardFont);
+        uiText.setCharacterSize(28);
+        uiText.setFillColor(sf::Color(255, 255, 255, 255));
+        uiText.setString(showcasedCard.name);
+        uiText.setPosition({aiCardAnimPos.x - 52.f, aiCardAnimPos.y - 164.f});
+        window.draw(uiText);
+        uiText.setFont(font);
+    }
 
     // 🌟【独立 UI 层：卡槽背景常驻】
     // 只要处于对局状态（PVP 或 PVE），卡槽就从一开始无条件永久渲染在右侧
@@ -2006,10 +2664,13 @@ void GameEngine::renderGameplay() {
                     if (static_cast<int>(i) == activeIdx) {
                         targetPos = cardPos; // 活跃卡回归点
                     } else {
-                        // 静态卡牌：完整渲染 + 槽顶卡文字
-                        newCardSprite->setScale({0.36f, 0.36f});
-                        newCardSprite->setPosition(cardPos);
-                        sf::Vector2u texSize = newCardTexture.getSize();
+                        // 静态卡牌：根据 cardColor 选择纹理
+                        bool isPurple = (playerDeck.hand[i].cardColor == 1);
+                        sf::Sprite* cardSpr = (isPurple && purpleCardSprite) ? purpleCardSprite : newCardSprite;
+                        sf::Texture& cardTex = isPurple ? purpleCardTexture : newCardTexture;
+                        cardSpr->setScale({0.36f, 0.36f});
+                        cardSpr->setPosition(cardPos);
+                        sf::Vector2u texSize = cardTex.getSize();
 
                         if (isReturningHandToDeck) {
                             // 🌟 退牌反向动画：裁剪 100%→0% + 白光 0%→100%（镜像出生动画）
@@ -2018,18 +2679,19 @@ void GameEngine::renderGameplay() {
                             float heightPct = 1.0f - t;
                             float whitePct  = t;
                             int clipH = static_cast<int>(texSize.y * heightPct);
-                            newCardSprite->setTextureRect(sf::IntRect({0, 0}, {static_cast<int>(texSize.x), clipH}));
+                            cardSpr->setTextureRect(sf::IntRect({0, 0}, {static_cast<int>(texSize.x), clipH}));
                             // BlendAlpha 基底
-                            newCardSprite->setColor(sf::Color(255, 255, 255, 255));
-                            window.draw(*newCardSprite, sf::BlendAlpha);
+                            cardSpr->setColor(sf::Color(255, 255, 255, 255));
+                            window.draw(*cardSpr, sf::BlendAlpha);
                             // BlendAdd 白光叠层（逐渐变亮直到纯白消失）
                             uint8_t w = static_cast<uint8_t>(255 * whitePct);
-                            newCardSprite->setColor(sf::Color(w, w, w, 255));
-                            window.draw(*newCardSprite, sf::BlendAdd);
+                            cardSpr->setColor(sf::Color(w, w, w, 255));
+                            window.draw(*cardSpr, sf::BlendAdd);
                             // 文字同步渐隐
                             if (heightPct > 0.02f) {
                                 uint8_t ta = static_cast<uint8_t>(255 * heightPct);
                                 const auto& sc = playerDeck.hand[i];
+                                const float rLineH = 26.f;
                                 uiText.setFont(cardFont);
                                 uiText.setCharacterSize(28);
                                 uiText.setFillColor(sf::Color(255, 255, 255, ta));
@@ -2038,29 +2700,46 @@ void GameEngine::renderGameplay() {
                                 window.draw(uiText);
                                 uiText.setCharacterSize(22);
                                 uiText.setFillColor(sf::Color(230, 230, 230, ta));
-                                uiText.setString(sc.description);
-                                uiText.setPosition({cardPos.x - 88.f, cardPos.y - 90.f});
-                                window.draw(uiText);
+                                std::wstring rDesc = sc.description;
+                                size_t rp = 0; int rli = 0;
+                                while (rp <= rDesc.size()) {
+                                    size_t rnl = rDesc.find(L'\n', rp);
+                                    if (rnl == std::wstring::npos) rnl = rDesc.size();
+                                    uiText.setString(sf::String(rDesc.substr(rp, rnl - rp)));
+                                    uiText.setPosition({cardPos.x - 88.f, cardPos.y - 90.f + rli * rLineH});
+                                    window.draw(uiText);
+                                    rp = rnl + 1; rli++;
+                                }
                                 uiText.setFont(font);
                             }
                         } else {
-                            newCardSprite->setTextureRect(sf::IntRect({0, 0}, {static_cast<int>(texSize.x), static_cast<int>(texSize.y)}));
-                            newCardSprite->setColor(sf::Color(255, 255, 255, 255));
-                            window.draw(*newCardSprite, sf::BlendAlpha);
-                            // 每张卡都渲染文字，渲染顺序天然保证上层遮下层
+                            cardSpr->setTextureRect(sf::IntRect({0, 0}, {static_cast<int>(texSize.x), static_cast<int>(texSize.y)}));
+                            cardSpr->setColor(sf::Color(255, 255, 255, 255));
+                            window.draw(*cardSpr, sf::BlendAlpha);
+                            // 文字逐行渲染（动画与静态统一间距）
                             {
                                 const auto& sc = playerDeck.hand[i];
+                                const float lineH = 26.f;
                                 uiText.setFont(cardFont);
+                                // 名称
                                 uiText.setCharacterSize(28);
                                 uiText.setFillColor(sf::Color(255, 255, 255, 255));
                                 uiText.setString(sc.name);
                                 uiText.setPosition({cardPos.x - 52.f, cardPos.y - 164.f});
                                 window.draw(uiText);
+                                // 描述逐行
                                 uiText.setCharacterSize(22);
                                 uiText.setFillColor(sf::Color(230, 230, 230, 255));
-                                uiText.setString(sc.description);
-                                uiText.setPosition({cardPos.x - 88.f, cardPos.y - 90.f});
-                                window.draw(uiText);
+                                std::wstring desc = sc.description;
+                                size_t pos = 0; int li = 0;
+                                while (pos <= desc.size()) {
+                                    size_t nl = desc.find(L'\n', pos);
+                                    if (nl == std::wstring::npos) nl = desc.size();
+                                    uiText.setString(sf::String(desc.substr(pos, nl - pos)));
+                                    uiText.setPosition({cardPos.x - 88.f, cardPos.y - 90.f + li * lineH});
+                                    window.draw(uiText);
+                                    pos = nl + 1; li++;
+                                }
                                 uiText.setFont(font);
                             }
                         }
@@ -2079,6 +2758,14 @@ void GameEngine::renderGameplay() {
             }
 
             // ── 顶卡：完整状态机 + 动画 + 文字 ──
+
+            // 紫卡活跃时临时切换精灵纹理
+            bool activeIsPurple = (activeIdx >= 0 && activeIdx < static_cast<int>(playerDeck.hand.size()) &&
+                                   playerDeck.hand[activeIdx].cardColor == 1);
+            const sf::Texture& savedTex = newCardSprite->getTexture();
+            if (activeIsPurple && purpleCardSprite) {
+                newCardSprite->setTexture(purpleCardTexture);
+            }
 
             // ============================================================
             // 🌟【新复合精调版】：支持鼠标吸附、弹回以及全新的湮灭仪式计算
@@ -2144,7 +2831,7 @@ void GameEngine::renderGameplay() {
                             break;
 
                         case CardAnnihilateState::MOVE_TO_ZERO: {
-                            // 【阶段 4】：缓动滑入读卡器，到达即完成
+                            // 【阶段 4】：缓动滑入读卡器（只计算坐标，绘制交统一路径）
                             float startY = 400.f;  // MOVE_TO_200 落点
                             float targetY = 210.f; // CardReader Y
                             float duration = 0.35f;
@@ -2153,26 +2840,6 @@ void GameEngine::renderGameplay() {
                             float eased = t * t * (3.f - 2.f * t);  // smoothstep
                             float curY = startY + (targetY - startY) * eased;
                             cardPos = {300.f, curY};
-
-                            // 正常绘制卡牌（跟随位移，无裁剪/淡出）
-                            newCardSprite->setScale({0.36f, 0.36f});
-                            newCardSprite->setPosition(cardPos);
-                            sf::Vector2u texSize = newCardTexture.getSize();
-                            newCardSprite->setTextureRect(sf::IntRect({0, 0}, {static_cast<int>(texSize.x), static_cast<int>(texSize.y)}));
-                            newCardSprite->setColor(sf::Color(255, 255, 255, 255));
-                            window.draw(*newCardSprite, sf::BlendAlpha);
-
-                            // 文字跟随
-                            if (!playerDeck.hand.empty() && activeIdx >= 0) {
-                                const auto& currentCard = playerDeck.hand[activeIdx];
-                                uiText.setFont(cardFont);
-                                uiText.setCharacterSize(28);
-                                uiText.setFillColor(sf::Color(255, 255, 255, 255));
-                                uiText.setString(currentCard.name);
-                                uiText.setPosition({cardPos.x - 52.f, cardPos.y - 164.f});
-                                window.draw(uiText);
-                                uiText.setFont(font);
-                            }
 
                             if (t >= 1.f) {
                                 if (!playerDeck.hand.empty() && attachedCardIndex >= 0) {
@@ -2221,7 +2888,6 @@ void GameEngine::renderGameplay() {
                 }
                 
                 if (annihilateState != CardAnnihilateState::PAUSE_FINAL
-                    && annihilateState != CardAnnihilateState::MOVE_TO_ZERO
                     && !cardAlreadyRendered) {
                 // 更新卡牌位置并锁死缩放比例
                 newCardSprite->setScale({0.36f, 0.36f});
@@ -2310,28 +2976,48 @@ void GameEngine::renderGameplay() {
                     if (textFadeFactor > 1.f) textFadeFactor = 1.f;
                     uint8_t textAlpha = static_cast<uint8_t>(255 * textFadeFactor);
 
-                    // 1. 名字：剩余高度 >2% 时渲染（连续判定，无帧率依赖）
-                    if (currentHeightPercent > 0.02f) {
-                        uiText.setCharacterSize(28);
-                        uiText.setFillColor(sf::Color(255, 255, 255, textAlpha));
-                        uiText.setString(currentCard.name);
-                        uiText.setPosition({cardPos.x - 52.f, cardPos.y - 164.f});
+                    // 文字跟随卡牌裁剪边缘逐行出现（0.1s 淡入+亮→原色）
+                    float halfH = texSize.y * 0.18f;
+                    auto lineTh = [&](float yOff) { return (halfH - yOff) / (halfH * 2.f); };
+                    auto drawLine = [&](const sf::String& str, float x, float y, int size,
+                                        sf::Color normColor, float threshold) {
+                        float lineAge = animTime - threshold; // 这行已可见多久
+                        if (lineAge < 0.f) return;
+                        float fade = lineAge / 0.1f; if (fade > 1.f) fade = 1.f;
+                        uint8_t a = static_cast<uint8_t>(255.f * fade);
+                        uint8_t r = static_cast<uint8_t>(normColor.r + (255 - normColor.r) * (1.f - fade));
+                        uint8_t g = static_cast<uint8_t>(normColor.g + (255 - normColor.g) * (1.f - fade));
+                        uint8_t b = static_cast<uint8_t>(normColor.b + (255 - normColor.b) * (1.f - fade));
+                        uiText.setCharacterSize(size);
+                        uiText.setFillColor(sf::Color(r, g, b, a));
+                        uiText.setString(str);
+                        uiText.setPosition({x, y});
                         window.draw(uiText);
-                    }
-
-                    // 2. 描述文字：剩余高度 >40% 时渲染
-                    if (currentHeightPercent > 0.40f) {
-                        uiText.setCharacterSize(22);
-                        uiText.setFillColor(sf::Color(230, 230, 230, textAlpha));
-                        uiText.setString(currentCard.description);
-                        uiText.setPosition({cardPos.x - 88.f, cardPos.y - 90.f});
-                        window.draw(uiText);
+                    };
+                    // 卡牌名
+                    drawLine(sf::String(currentCard.name), cardPos.x - 52.f, cardPos.y - 164.f,
+                             28, sf::Color(255, 255, 255), lineTh(164.f));
+                    // 描述逐行（行距与静态卡牌统一：26px）
+                    const float lineH = 26.f;
+                    std::wstring desc = currentCard.description;
+                    size_t pos = 0; int li = 0;
+                    while (pos <= desc.size()) {
+                        size_t nl = desc.find(L'\n', pos);
+                        if (nl == std::wstring::npos) nl = desc.size();
+                        float ly = 90.f - li * lineH;
+                        drawLine(sf::String(desc.substr(pos, nl - pos)), cardPos.x - 88.f,
+                                 cardPos.y - ly, 22, sf::Color(230, 230, 230), lineTh(ly));
+                        pos = nl + 1; li++;
                     }
 
                     uiText.setFont(font); // 恢复主系统字体
                 }
                 } // end if (isReturningHandToDeck) else
             } // 顶卡状态机作用域结束
+        }
+        // 恢复精灵纹理（紫卡临时切换）
+        if (activeIsPurple) {
+            newCardSprite->setTexture(savedTex, true);
         }
     }
     }
@@ -2392,25 +3078,38 @@ void GameEngine::renderGameplay() {
                 newCardSprite->setColor(sf::Color(whiteEmit, whiteEmit, whiteEmit, 255));
                 window.draw(*newCardSprite, sf::BlendAdd);
 
-                // 文字淡入
-                float textFade = t / 0.5f;
-                if (textFade > 1.f) textFade = 1.f;
-                uint8_t ta = static_cast<uint8_t>(255 * textFade);
-
-                uiText.setFont(cardFont);
-                if (heightPercent > 0.02f) {
-                    uiText.setCharacterSize(NAME_FONT);
-                    uiText.setFillColor(sf::Color(255, 255, 255, ta));
-                    uiText.setString(showcasedCard.name);
-                    uiText.setPosition({centerPos.x - NAME_OFF_X, centerPos.y - NAME_OFF_Y});
+                // 文字跟随裁剪边缘出现（0.1s 淡入+亮→原色）
+                float sHalfH = texSize.y * TARGET_SCALE * 0.5f;
+                auto sLineTh = [&](float yOff) { return (sHalfH - yOff) / (sHalfH * 2.f); };
+                auto sDrawLine = [&](const sf::String& str, float x, float y, int size,
+                                     sf::Color normColor, float threshold) {
+                    float lineAge = t - threshold;
+                    if (lineAge < 0.f) return;
+                    float fade = lineAge / 0.1f; if (fade > 1.f) fade = 1.f;
+                    uint8_t a = static_cast<uint8_t>(255.f * fade);
+                    uint8_t r = static_cast<uint8_t>(normColor.r + (255 - normColor.r) * (1.f - fade));
+                    uint8_t g = static_cast<uint8_t>(normColor.g + (255 - normColor.g) * (1.f - fade));
+                    uint8_t b = static_cast<uint8_t>(normColor.b + (255 - normColor.b) * (1.f - fade));
+                    uiText.setFont(cardFont);
+                    uiText.setCharacterSize(size);
+                    uiText.setFillColor(sf::Color(r, g, b, a));
+                    uiText.setString(str);
+                    uiText.setPosition({x, y});
                     window.draw(uiText);
-                }
-                if (heightPercent > 0.40f) {
-                    uiText.setCharacterSize(DESC_FONT);
-                    uiText.setFillColor(sf::Color(230, 230, 230, ta));
-                    uiText.setString(showcasedCard.description);
-                    uiText.setPosition({centerPos.x - DESC_OFF_X, centerPos.y - DESC_OFF_Y});
-                    window.draw(uiText);
+                };
+                sDrawLine(sf::String(showcasedCard.name), centerPos.x - NAME_OFF_X,
+                          centerPos.y - NAME_OFF_Y, NAME_FONT, sf::Color(255, 255, 255), sLineTh(NAME_OFF_Y));
+                // 描述逐行（行距统一）
+                float sLineH = DESC_FONT * 1.15f;
+                std::wstring desc = showcasedCard.description;
+                size_t pos = 0; int li = 0;
+                while (pos <= desc.size()) {
+                    size_t nl = desc.find(L'\n', pos);
+                    if (nl == std::wstring::npos) nl = desc.size();
+                    float ly = DESC_OFF_Y - li * sLineH;
+                    sDrawLine(sf::String(desc.substr(pos, nl - pos)), centerPos.x - DESC_OFF_X,
+                              centerPos.y - ly, DESC_FONT, sf::Color(230, 230, 230), sLineTh(ly));
+                    pos = nl + 1; li++;
                 }
                 uiText.setFont(font);
 
@@ -2437,11 +3136,20 @@ void GameEngine::renderGameplay() {
                 uiText.setPosition({centerPos.x - NAME_OFF_X, centerPos.y - NAME_OFF_Y});
                 window.draw(uiText);
 
+                // 描述逐行
                 uiText.setCharacterSize(DESC_FONT);
                 uiText.setFillColor(sf::Color(230, 230, 230, 255));
-                uiText.setString(showcasedCard.description);
-                uiText.setPosition({centerPos.x - DESC_OFF_X, centerPos.y - DESC_OFF_Y});
-                window.draw(uiText);
+                float dLineH = DESC_FONT * 1.15f;
+                std::wstring desc = showcasedCard.description;
+                size_t pos = 0; int li = 0;
+                while (pos <= desc.size()) {
+                    size_t nl = desc.find(L'\n', pos);
+                    if (nl == std::wstring::npos) nl = desc.size();
+                    uiText.setString(sf::String(desc.substr(pos, nl - pos)));
+                    uiText.setPosition({centerPos.x - DESC_OFF_X, centerPos.y - DESC_OFF_Y + li * dLineH});
+                    window.draw(uiText);
+                    pos = nl + 1; li++;
+                }
                 uiText.setFont(font);
 
                 if (t >= 1.2f) {
@@ -2472,7 +3180,8 @@ void GameEngine::renderGameplay() {
                 newCardSprite->setColor(sf::Color(whiteEmit, whiteEmit, whiteEmit, 255));
                 window.draw(*newCardSprite, sf::BlendAdd);
 
-                // 文字同步淡出
+                // 文字同步淡出（逐行）
+                float fLineH = DESC_FONT * 1.15f;
                 uiText.setFont(cardFont);
                 uiText.setCharacterSize(NAME_FONT);
                 uiText.setFillColor(sf::Color(255, 255, 255, currentAlpha));
@@ -2482,9 +3191,16 @@ void GameEngine::renderGameplay() {
 
                 uiText.setCharacterSize(DESC_FONT);
                 uiText.setFillColor(sf::Color(230, 230, 230, currentAlpha));
-                uiText.setString(showcasedCard.description);
-                uiText.setPosition({centerPos.x - DESC_OFF_X, centerPos.y - DESC_OFF_Y});
-                window.draw(uiText);
+                std::wstring desc = showcasedCard.description;
+                size_t pos = 0; int li = 0;
+                while (pos <= desc.size()) {
+                    size_t nl = desc.find(L'\n', pos);
+                    if (nl == std::wstring::npos) nl = desc.size();
+                    uiText.setString(sf::String(desc.substr(pos, nl - pos)));
+                    uiText.setPosition({centerPos.x - DESC_OFF_X, centerPos.y - DESC_OFF_Y + li * fLineH});
+                    window.draw(uiText);
+                    pos = nl + 1; li++;
+                }
                 uiText.setFont(font);
 
                 if (t >= 0.4f) {
@@ -2511,8 +3227,9 @@ void GameEngine::renderGameplay() {
     }
     // ============================================================================
 
-    if (currentState == GameState::GAME_PVP || currentState == GameState::GAME_PVE) {
+    if ((currentState == GameState::GAME_PVP || currentState == GameState::GAME_PVE) && !isPaused) {
         window.draw(detectionZone);
+        window.draw(portalDetectionZone);
     }
 
     // ============================================================================
@@ -2532,163 +3249,487 @@ void GameEngine::renderGameplay() {
     if (currentState == GameState::GAME_PVP || currentState == GameState::GAME_PVE) {
         if (!(currentState == GameState::GAME_PVE && isAiThinking)) {
             // 只有在鼠标没有抓取卡牌 且 不在动画期间 时，才绘制预落子提示环
-            if (!isCardAttachedToMouse && !isBusyAnimating) {
+            if (!isCardAttachedToMouse && !isBusyAnimating && !isPaused) {
                 chessboard.drawHoverRing(window, currentTurn);
             }
         }
     }
 
-    // 2. 渲染 UI 按钮
-    for (auto& rect : gameButtons) window.draw(rect);
-    for (auto& text : gameButtonTexts) window.draw(text);
-
-    // 3. 渲染计时器
+    // 2. 渲染计时器
     int remainingTime = static_cast<int>(std::ceil(45.f - getEffectiveTurnTime()));
     if (remainingTime < 0) remainingTime = 0;
     timerText.setFillColor(remainingTime <= 10 ? sf::Color(220, 40, 40) : sf::Color(40, 120, 40));
     timerText.setString(sf::String(L"剩余时间: " + std::to_wstring(remainingTime) + L" 秒"));
     timerText.setPosition({900.f, 15.f});
     window.draw(timerText);
+
+    // ── 暂停覆盖层（淡入/淡出各 0.5s）──
+    float fadeElapsed = pauseFadeClock.getElapsedTime().asSeconds();
+    float fadeT = fadeElapsed / 0.5f;
+    if (fadeT > 1.f) fadeT = 1.f;
+    if (!isPaused) fadeT = 1.f - fadeT;  // 退出时反向
+
+    // 下落动画（进入：从上方1200px落下；退出：回到上方1200px）
+    float dropT = fadeElapsed / 0.5f;
+    if (dropT > 1.f) dropT = 1.f;
+    float easedDrop = 1.f - (1.f - dropT) * (1.f - dropT) * (1.f - dropT);
+    float dropOffset = isPaused ? (-1200.f * (1.f - easedDrop))   // 进入：-1200→0 落下
+                                : (-1200.f * easedDrop);           // 退出：0→-1200 飞回
+    float elemAlpha = isPaused ? easedDrop : (1.f - easedDrop);    // 元素透明度（缓出）
+
+    if (isPaused || fadeT > 0.f) {
+        uint8_t overlayAlpha = static_cast<uint8_t>(160.f * fadeT);
+        sf::RectangleShape overlay({2560.f, 1440.f});
+        overlay.setPosition({0.f, 0.f});
+        overlay.setFillColor(sf::Color(0, 0, 0, overlayAlpha));
+        window.draw(overlay);
+
+        uint8_t ea = static_cast<uint8_t>(255.f * elemAlpha);
+
+        // SettingsMenu 背景图（带下落+淡入）
+        if (settingsMenuLoaded) {
+            float smw = static_cast<float>(settingsMenuTex.getSize().x);
+            float smScale = 800.f / smw * 1.5f;
+            settingsMenuSpr.setScale({smScale, smScale});
+            settingsMenuSpr.setPosition({1280.f, 680.f + dropOffset});
+            settingsMenuSpr.setColor(sf::Color(255, 255, 255, ea));
+            window.draw(settingsMenuSpr);
+        }
+
+        const float centerX = WINDOW_WIDTH * 0.5f;
+        const float btnW = 320.f;
+        const float btnH = 67.f;
+        const float hitW = btnW * 1.1f;
+        const float hitH = btnH * 1.8f;
+        const float hitX = centerX - hitW * 0.5f;
+        const float menuStartY = 623.f;
+        const int   btnCount = 4;
+        const float btnY[4] = { menuStartY, menuStartY + 137.f, menuStartY + 324.f, menuStartY + 511.f };
+        const std::wstring labels[4] = { L"认输放弃", L"重开一局", L"返回主页", L"退出游戏" };
+        const float btnOffX[4] = { -100.f, 0.f, 100.f, 240.f };
+        const float btnOffY[4] = { -50.f, 0.f, 0.f, 0.f };
+
+        // 悬停检测（跟随下落动画）
+        sf::Vector2i mp = sf::Mouse::getPosition(window);
+        sf::Vector2f mpos = window.mapPixelToCoords(mp);
+        int hoverIdx = -1;
+        for (int i = 0; i < btnCount; ++i) {
+            float hx = hitX + btnOffX[i];
+            float hy = btnY[i] - (hitH - btnH) * 0.5f + btnOffY[i] + dropOffset;
+            if (mpos.x > hx && mpos.x < hx + hitW && mpos.y > hy && mpos.y < hy + hitH)
+                { hoverIdx = i; break; }
+        }
+
+        // 悬停抖动（60Hz, ±1px）
+        float jx = 0.f, jy = 0.f;
+        if (hoverIdx >= 0 && menuJitterClock.getElapsedTime().asSeconds() >= 1.f / 60.f) {
+            jx = (static_cast<float>(rand()) / RAND_MAX * 2.f - 1.f);
+            jy = (static_cast<float>(rand()) / RAND_MAX * 2.f - 1.f);
+            menuJitterClock.restart();
+        }
+
+        float ffw = static_cast<float>(uiFrameTex.getSize().x);
+        float ffh = static_cast<float>(uiFrameTex.getSize().y);
+        float frameScale = 120.6f / ffh;
+
+        // UI_Frame 按钮
+        for (int i = 0; i < btnCount; ++i) {
+            float by = btnY[i] - (hitH - btnH) * 0.5f + btnOffY[i] + dropOffset;
+            sf::Vector2f bpos(hitX + btnOffX[i], by);
+            sf::Vector2f bsize(hitW, hitH);
+            bool hover = (i == hoverIdx);
+            float s = hover ? frameScale * 1.05f : frameScale;
+            float ox = hover ? 10.f : 0.f;
+            float oy = hover ? -10.f : 0.f;
+            float hx = hover ? jx : 0.f;
+            float hy = hover ? jy : 0.f;
+            uiFrameSpr.setScale({s, s});
+            uiFrameSpr.setPosition({bpos.x + bsize.x / 2.f - ox + hx, bpos.y + bsize.y / 2.f + oy + hy});
+            uiFrameSpr.setColor(sf::Color(255, 255, 255, ea));
+            window.draw(uiFrameSpr);
+        }
+        uiFrameSpr.setColor(sf::Color(255, 255, 255, 255)); // 恢复，避免影响主菜单
+
+        // 文字
+        uiText.setFont(cardFont);
+        uiText.setCharacterSize(48);
+        uiText.setFillColor(sf::Color(50, 15, 70, ea));
+        for (int i = 0; i < btnCount; ++i) {
+            bool hover = (i == hoverIdx);
+            uiText.setString(sf::String(labels[i]));
+            sf::FloatRect tb = uiText.getLocalBounds();
+            float tx = centerX - (tb.position.x + tb.size.x) * 0.5f + btnOffX[i];
+            float ty = btnY[i] + (btnH - tb.size.y) * 0.5f - tb.position.y + btnOffY[i] + dropOffset;
+            if (hover) {
+                uiText.setCharacterSize(50);
+                uiText.setPosition({tx - 6.f + jx, ty - 10.f + jy});
+                window.draw(uiText);
+                uiText.setPosition({tx, ty});
+                uiText.setCharacterSize(48);
+            } else {
+                uiText.setPosition({tx, ty});
+                window.draw(uiText);
+            }
+        }
+    }
 }
 
 void GameEngine::renderGameOver() {
-    const float centerX = WINDOW_WIDTH * 0.5f;
+    // ── 背景：星空帧动画 ──
+    {
+        static GameState lastBgState = GameState::MENU;
+        if (currentState != lastBgState) { bgCurrentFrame = -1; lastBgState = currentState; }
+        float bgElapsed = bgFrameClock.getElapsedTime().asSeconds();
+        int frame = static_cast<int>(bgElapsed * 25.f) % BG_TOTAL_FRAMES + 1;
+        if (frame != bgCurrentFrame) {
+            char path[128]; snprintf(path, sizeof(path), "assets/Universe/frame_%05d.jpg", frame);
+            if (bgTexA.loadFromFile(getEngineAssetPath(path))) {
+                bgSprA.setTexture(bgTexA, true);
+                float sw = 2560.f / bgTexA.getSize().x;
+                float sh = 1440.f / bgTexA.getSize().y;
+                bgSprA.setScale({sw, sh});
+                bgSprA.setPosition({0.f, 0.f});
+                bgSprA.setColor(sf::Color(255, 255, 255, 255));
+            }
+            bgCurrentFrame = frame;
+        }
+        window.draw(bgSprA);
+    }
+
     chessboard.draw(window);
 
-    sf::RectangleShape cover({static_cast<float>(WINDOW_WIDTH), static_cast<float>(WINDOW_HEIGHT)});
+    // 半透明遮罩
+    sf::RectangleShape cover({2560.f, 1440.f});
     cover.setFillColor(sf::Color(0, 0, 0, 180));
     window.draw(cover);
 
-    uiText.setCharacterSize(48);
-    uiText.setFillColor(sf::Color::White);
+    const float centerX = WINDOW_WIDTH * 0.5f;
+
+    // 标题
+    uiText.setFont(cardFont);
+    uiText.setCharacterSize(78);
+    uiText.setFillColor(sf::Color(200, 160, 230));
     uiText.setString(sf::String(L"对局结束"));
     sf::FloatRect titleBounds = uiText.getLocalBounds();
-    uiText.setPosition(sf::Vector2f(centerX - (titleBounds.position.x + titleBounds.size.x) * 0.5f, 200.f));
+    uiText.setPosition(sf::Vector2f(centerX - (titleBounds.position.x + titleBounds.size.x) * 0.5f, 380.f));
     window.draw(uiText);
 
-    sf::Text resultText(font, winReason, 32);
-    resultText.setFillColor(sf::Color(240, 190, 40));
-    sf::FloatRect resultBounds = resultText.getLocalBounds();
-    resultText.setPosition(sf::Vector2f(centerX - (resultBounds.position.x + resultBounds.size.x) * 0.5f, 300.f));
-    window.draw(resultText);
-
-    sf::RectangleShape btnReset({200.f, 50.f});
-    btnReset.setPosition({centerX - 100.f, 420.f});
-    btnReset.setFillColor(sf::Color(200, 50, 50));
-    window.draw(btnReset);
-
-    uiText.setCharacterSize(36);
+    // 胜负文字
+    uiText.setFont(cardFont);
+    uiText.setCharacterSize(48);
     uiText.setFillColor(sf::Color::White);
+    uiText.setString(sf::String(winReason));
+    sf::FloatRect resultBounds = uiText.getLocalBounds();
+    uiText.setPosition(sf::Vector2f(centerX - (resultBounds.position.x + resultBounds.size.x) * 0.5f, 520.f));
+    window.draw(uiText);
+
+    // UI_Frame 按钮
+    float ffw = static_cast<float>(uiFrameTex.getSize().x);
+    float ffh = static_cast<float>(uiFrameTex.getSize().y);
+    float frameScale = 120.6f / ffh;
+    uiFrameSpr.setScale({frameScale, frameScale});
+    uiFrameSpr.setPosition({centerX, 680.f});
+    uiFrameSpr.setColor(sf::Color(255, 255, 255, 255));
+    window.draw(uiFrameSpr);
+
+    // 按钮文字（垂直居中于 Y=680）
+    uiText.setFont(cardFont);
+    uiText.setCharacterSize(48);
+    uiText.setFillColor(sf::Color(50, 15, 70));
     uiText.setString(sf::String(L"回到主菜单"));
     sf::FloatRect resetBounds = uiText.getLocalBounds();
-    uiText.setPosition(sf::Vector2f(centerX - (resetBounds.position.x + resetBounds.size.x) * 0.5f, 430.f));
+    uiText.setPosition(sf::Vector2f(centerX - (resetBounds.position.x + resetBounds.size.x) * 0.5f,
+        680.f - resetBounds.size.y * 0.5f - resetBounds.position.y));
     window.draw(uiText);
 }
 
 void GameEngine::renderSettings() {
-    const float centerX = WINDOW_WIDTH * 0.5f;
-    const float buttonWidth = 400.f;
-    const float buttonX = centerX - buttonWidth * 0.5f;
+    // ── 背景：星空帧动画（与主菜单一致）──
+    // ── Universe 背景（本界面独立加载，每帧缓存）──
+    {
+        static GameState lastBgState = GameState::MENU;
+        if (currentState != lastBgState) { bgCurrentFrame = -1; lastBgState = currentState; }
+        float bgElapsed = bgFrameClock.getElapsedTime().asSeconds();
+        int frame = static_cast<int>(bgElapsed * 25.f) % BG_TOTAL_FRAMES + 1;
+        if (frame != bgCurrentFrame) {
+            char path[128]; snprintf(path, sizeof(path),
+                "assets/Universe/frame_%05d.jpg", frame);
+            if (bgTexA.loadFromFile(getEngineAssetPath(path))) {
+                bgSprA.setTexture(bgTexA, true);
+                float sw = 2560.f / bgTexA.getSize().x;
+                float sh = 1440.f / bgTexA.getSize().y;
+                bgSprA.setScale({sw, sh});
+                bgSprA.setPosition({0.f, 0.f});
+                bgSprA.setColor(sf::Color(255, 255, 255, 255));
+            }
+            bgCurrentFrame = frame;
+        }
+        window.draw(bgSprA);
+    }
 
-    uiText.setCharacterSize(48);
-    uiText.setFillColor(sf::Color(100, 60, 30));
+    // ── 按钮参数（与主菜单一致）──
+    const float centerX = WINDOW_WIDTH * 0.5f;
+    const float btnW = 320.f;
+    const float btnH = 67.f;
+    const float hitW = btnW * 1.1f;
+    const float hitH = btnH * 1.8f;
+    const float hitX = centerX - hitW * 0.5f;
+    const float menuStartY = 543.f;
+
+    // 三个按钮的 Y 坐标（间距 137）
+    const float btnY[3] = { menuStartY, menuStartY + 137.f, menuStartY + 274.f };
+    const std::wstring btnLabels[3] = {
+        isProfessionalMode ? L"专业模式:开启" : L"专业模式:关闭",
+        isFullscreen ? L"全屏模式:开启" : L"全屏模式:关闭",
+        L"返回主菜单"
+    };
+
+    // ── 标题 ──
+    uiText.setFont(cardFont);
+    uiText.setCharacterSize(78);
+    uiText.setFillColor(sf::Color(200, 160, 230));
     uiText.setString(sf::String(L"游戏设置"));
     sf::FloatRect titleBounds = uiText.getLocalBounds();
-    uiText.setPosition(sf::Vector2f(centerX - (titleBounds.position.x + titleBounds.size.x) * 0.5f, 50.f));
+    uiText.setPosition(sf::Vector2f(centerX - (titleBounds.position.x + titleBounds.size.x) * 0.5f, 380.f));
     window.draw(uiText);
 
-    // 专业模式按钮
-    sf::RectangleShape btn1({buttonWidth, 50.f});
-    btn1.setPosition({buttonX, 140.f});
-    btn1.setFillColor(sf::Color(218, 171, 118));
-    window.draw(btn1);
+    // ── 悬停检测 ──
+    sf::Vector2i mp = sf::Mouse::getPosition(window);
+    sf::Vector2f mpos = window.mapPixelToCoords(mp);
+    int hoverIdx = -1;
+    for (int i = 0; i < 3; ++i) {
+        float hy = btnY[i] - (hitH - btnH) * 0.5f;
+        if (mpos.x > hitX && mpos.x < hitX + hitW && mpos.y > hy && mpos.y < hy + hitH)
+            { hoverIdx = i; break; }
+    }
+    float jx = 0.f, jy = 0.f;
+    if (hoverIdx >= 0 && menuJitterClock.getElapsedTime().asSeconds() >= 1.f / 60.f) {
+        jx = (static_cast<float>(rand()) / RAND_MAX * 2.f - 1.f);
+        jy = (static_cast<float>(rand()) / RAND_MAX * 2.f - 1.f);
+        menuJitterClock.restart();
+    }
 
-    uiText.setCharacterSize(36);
-    uiText.setFillColor(sf::Color(60, 40, 20));
-    std::wstring modeText = isProfessionalMode ? L"专业模式：开启" : L"专业模式：关闭";
-    uiText.setString(sf::String(modeText));
-    sf::FloatRect modeBounds = uiText.getLocalBounds();
-    uiText.setPosition(sf::Vector2f(centerX - (modeBounds.position.x + modeBounds.size.x) * 0.5f, 150.f));
-    window.draw(uiText);
+    // ── UI_Frame 按钮背景 ──
+    float ffw = static_cast<float>(uiFrameTex.getSize().x);
+    float ffh = static_cast<float>(uiFrameTex.getSize().y);
+    float frameScale = 120.6f / ffh;
+    for (int i = 0; i < 3; ++i) {
+        float by = btnY[i] - (hitH - btnH) * 0.5f;
+        sf::Vector2f bpos(hitX, by);
+        sf::Vector2f bsize(hitW, hitH);
+        bool hover = (i == hoverIdx);
+        float s = hover ? frameScale * 1.05f : frameScale;
+        float ox = hover ? 10.f : 0.f;
+        float oy = hover ? -10.f : 0.f;
+        float hx = hover ? jx : 0.f;
+        float hy2 = hover ? jy : 0.f;
+        uiFrameSpr.setScale({s, s});
+        uiFrameSpr.setPosition({bpos.x + bsize.x / 2.f - ox + hx, bpos.y + bsize.y / 2.f + oy + hy2});
+        uiFrameSpr.setColor(sf::Color(255, 255, 255, 255));
+        window.draw(uiFrameSpr);
+    }
 
-    // 全屏模式按钮
-    sf::RectangleShape btn2({buttonWidth, 50.f});
-    btn2.setPosition({buttonX, 210.f});
-    btn2.setFillColor(sf::Color(218, 171, 118));
-    window.draw(btn2);
-
-    std::wstring fullscreenText = isFullscreen ? L"全屏模式：开启" : L"全屏模式：关闭";
-    uiText.setString(sf::String(fullscreenText));
-    sf::FloatRect fullBounds = uiText.getLocalBounds();
-    uiText.setPosition(sf::Vector2f(centerX - (fullBounds.position.x + fullBounds.size.x) * 0.5f, 220.f));
-    window.draw(uiText);
+    // ── 按钮文字 ──
+    uiText.setFont(cardFont);
+    uiText.setCharacterSize(48);
+    uiText.setFillColor(sf::Color(50, 15, 70));
+    for (int i = 0; i < 3; ++i) {
+        bool hover = (i == hoverIdx);
+        uiText.setString(sf::String(btnLabels[i]));
+        sf::FloatRect tb = uiText.getLocalBounds();
+        float tx = centerX - (tb.position.x + tb.size.x) * 0.5f;
+        float ty = btnY[i] + (btnH - tb.size.y) * 0.5f - tb.position.y;
+        if (hover) {
+            uiText.setCharacterSize(50);
+            uiText.setPosition({tx - 6.f + jx, ty - 10.f + jy});
+            window.draw(uiText);
+            uiText.setPosition({tx, ty});
+            uiText.setCharacterSize(48);
+        } else {
+            uiText.setPosition({tx, ty});
+            window.draw(uiText);
+        }
+    }
 }
 
 void GameEngine::renderInfo() {
-    uiText.setCharacterSize(48);
-    uiText.setFillColor(sf::Color(100, 60, 30));
-
-    std::wstring infoTitle = (currentState == GameState::HELP) ? L"游戏规则" : L"历史记录";
-    uiText.setString(sf::String(infoTitle));
-    uiText.setPosition({220.f, 50.f});
-    window.draw(uiText);
-
-    uiText.setCharacterSize(32);
-    uiText.setFillColor(sf::Color(60, 40, 20));
-
     if (currentState == GameState::HELP) {
-        std::wstring infoContent = L"五子棋规则：\n在 15×15 的棋盘上，\n黑白双方轮流落子，\n先达成五连者获胜。\n\n点击屏幕任意位置返回。";
-        uiText.setString(sf::String(infoContent));
-        uiText.setPosition({100.f, 150.f});
-        window.draw(uiText);
-        return;
-    }
-
-    // HISTORY 界面：列出 saves/ 下的文件（按文件名排序）
-    auto dir = getSavesDir();
-    std::vector<std::filesystem::path> files;
-    if (std::filesystem::exists(dir)) {
-        for (auto &entry : std::filesystem::directory_iterator(dir)) {
-            if (entry.is_regular_file()) files.push_back(entry.path());
+        // ── 背景：星空帧动画 ──
+        float bgElapsed = bgFrameClock.getElapsedTime().asSeconds();
+        int frame = static_cast<int>(bgElapsed * 25.f) % BG_TOTAL_FRAMES + 1;
+        char path[128]; snprintf(path, sizeof(path),
+            "assets/Universe/frame_%05d.jpg", frame);
+        if (bgTexA.loadFromFile(getEngineAssetPath(path))) {
+            bgSprA.setTexture(bgTexA, true);
+            float sw = 2560.f / bgTexA.getSize().x;
+            float sh = 1440.f / bgTexA.getSize().y;
+            bgSprA.setScale({sw, sh});
+            bgSprA.setPosition({0.f, 0.f});
+            bgSprA.setColor(sf::Color(255, 255, 255, 255));
+            // ── Universe 背景（本界面独立加载，每帧缓存）──
+    {
+        static GameState lastBgState = GameState::MENU;
+        if (currentState != lastBgState) { bgCurrentFrame = -1; lastBgState = currentState; }
+        float bgElapsed = bgFrameClock.getElapsedTime().asSeconds();
+        int frame = static_cast<int>(bgElapsed * 25.f) % BG_TOTAL_FRAMES + 1;
+        if (frame != bgCurrentFrame) {
+            char path[128]; snprintf(path, sizeof(path),
+                "assets/Universe/frame_%05d.jpg", frame);
+            if (bgTexA.loadFromFile(getEngineAssetPath(path))) {
+                bgSprA.setTexture(bgTexA, true);
+                float sw = 2560.f / bgTexA.getSize().x;
+                float sh = 1440.f / bgTexA.getSize().y;
+                bgSprA.setScale({sw, sh});
+                bgSprA.setPosition({0.f, 0.f});
+                bgSprA.setColor(sf::Color(255, 255, 255, 255));
+            }
+            bgCurrentFrame = frame;
         }
+        window.draw(bgSprA);
     }
-    // 以文件名倒序（最新在前）
-    std::sort(files.begin(), files.end(), std::greater<>());
+        }
 
-    historyItems.clear();
+        const float centerX = WINDOW_WIDTH * 0.5f;
 
-    float startX = 80.f;
-    float startY = 120.f;
-    float lineH = 45.f;
-    int idx = 0;
-    if (files.empty()) {
-        std::wstring infoContent = L"暂无历史记录。\n\n\n点击屏幕任意位置返回。";
-        uiText.setString(sf::String(infoContent));
-        uiText.setPosition({100.f, 150.f});
+        // ── 标题 ──
+        uiText.setFont(cardFont);
+        uiText.setCharacterSize(78);
+        uiText.setFillColor(sf::Color(200, 160, 230));
+        uiText.setString(sf::String(L"游戏规则"));
+        sf::FloatRect titleBounds = uiText.getLocalBounds();
+        uiText.setPosition(sf::Vector2f(centerX - (titleBounds.position.x + titleBounds.size.x) * 0.5f, 380.f));
         window.draw(uiText);
+
+        // ── 正文（分行）──
+        uiText.setFont(cardFont);
+        uiText.setCharacterSize(48);
+        uiText.setFillColor(sf::Color::White);
+
+        const std::wstring lines[] = {
+            L"五子棋规则：",
+            L"在 15×15 的棋盘上，黑白双方轮流落子，",
+            L"先达成五连者获胜。",
+            L"",
+            L"卡牌系统：",
+            L"三连抽卡 → 拖至读卡器 → 触发效果",
+            L"",
+            L"点击屏幕任意位置返回",
+        };
+        const float lineH = 62.f;
+        const float startY = 560.f;
+        for (int i = 0; i < 8; ++i) {
+            uiText.setString(sf::String(lines[i]));
+            sf::FloatRect tb = uiText.getLocalBounds();
+            uiText.setPosition(sf::Vector2f(centerX - (tb.position.x + tb.size.x) * 0.5f, startY + i * lineH));
+            window.draw(uiText);
+        }
         return;
     }
 
-    for (const auto& p : files) {
-        if (idx >= 12) break; // 显示最多 12 条，避免超出
-        sf::RectangleShape rowBg({900.f, 40.f});
-        rowBg.setPosition({startX, startY + idx * lineH});
-        rowBg.setFillColor(sf::Color(245,235,220));
-        window.draw(rowBg);
+    // ── HISTORY：星空背景 + 统一字体风格 ──
+    {
+        float bgElapsed = bgFrameClock.getElapsedTime().asSeconds();
+        int frame = static_cast<int>(bgElapsed * 25.f) % BG_TOTAL_FRAMES + 1;
+        char path[128]; snprintf(path, sizeof(path),
+            "assets/Universe/frame_%05d.jpg", frame);
+        if (bgTexA.loadFromFile(getEngineAssetPath(path))) {
+            bgSprA.setTexture(bgTexA, true);
+            float sw = 2560.f / bgTexA.getSize().x;
+            float sh = 1440.f / bgTexA.getSize().y;
+            bgSprA.setScale({sw, sh});
+            bgSprA.setPosition({0.f, 0.f});
+            bgSprA.setColor(sf::Color(255, 255, 255, 255));
+            // ── Universe 背景（本界面独立加载，每帧缓存）──
+    {
+        static GameState lastBgState = GameState::MENU;
+        if (currentState != lastBgState) { bgCurrentFrame = -1; lastBgState = currentState; }
+        float bgElapsed = bgFrameClock.getElapsedTime().asSeconds();
+        int frame = static_cast<int>(bgElapsed * 25.f) % BG_TOTAL_FRAMES + 1;
+        if (frame != bgCurrentFrame) {
+            char path[128]; snprintf(path, sizeof(path),
+                "assets/Universe/frame_%05d.jpg", frame);
+            if (bgTexA.loadFromFile(getEngineAssetPath(path))) {
+                bgSprA.setTexture(bgTexA, true);
+                float sw = 2560.f / bgTexA.getSize().x;
+                float sh = 1440.f / bgTexA.getSize().y;
+                bgSprA.setScale({sw, sh});
+                bgSprA.setPosition({0.f, 0.f});
+                bgSprA.setColor(sf::Color(255, 255, 255, 255));
+            }
+            bgCurrentFrame = frame;
+        }
+        window.draw(bgSprA);
+    }
+        }
 
-        std::wstring nameW;
-        std::string fn = p.filename().string();
-        // 将 std::string 转为 wstring 简单方式（仅用于 ASCII 文件名）
-        nameW.assign(fn.begin(), fn.end());
+        const float centerX = WINDOW_WIDTH * 0.5f;
 
-        sf::Text fnText(font, nameW, 32);
-        fnText.setFillColor(sf::Color(60,40,20));
-        fnText.setPosition({startX + 10.f, startY + idx * lineH + 8.f});
-        window.draw(fnText);
+        // ── 标题 ──
+        uiText.setFont(cardFont);
+        uiText.setCharacterSize(78);
+        uiText.setFillColor(sf::Color(200, 160, 230));
+        uiText.setString(sf::String(L"历史记录"));
+        sf::FloatRect titleBounds = uiText.getLocalBounds();
+        uiText.setPosition(sf::Vector2f(centerX - (titleBounds.position.x + titleBounds.size.x) * 0.5f, 380.f));
+        window.draw(uiText);
 
-        // 保存该行的 rect 与路径，供点击检测使用（注意：getGlobalBounds 返回 FloatRect）
-        historyItems.emplace_back(rowBg.getGlobalBounds(), p);
-        idx++;
+        // ── 文件列表 ──
+        auto dir = getSavesDir();
+        std::vector<std::filesystem::path> files;
+        if (std::filesystem::exists(dir)) {
+            for (auto &entry : std::filesystem::directory_iterator(dir)) {
+                if (entry.is_regular_file()) files.push_back(entry.path());
+            }
+        }
+        std::sort(files.begin(), files.end(), std::greater<>());
+
+        historyItems.clear();
+
+        const float listStartY = 560.f;
+        const float lineH = 52.f;
+
+        if (files.empty()) {
+            uiText.setFont(cardFont);
+            uiText.setCharacterSize(48);
+            uiText.setFillColor(sf::Color::White);
+            uiText.setString(sf::String(L"暂无历史记录"));
+            sf::FloatRect tb = uiText.getLocalBounds();
+            uiText.setPosition(sf::Vector2f(centerX - (tb.position.x + tb.size.x) * 0.5f, listStartY));
+            window.draw(uiText);
+        } else {
+            int idx = 0;
+            for (const auto& p : files) {
+                if (idx >= 12) break;
+
+                std::wstring nameW;
+                std::string fn = p.filename().string();
+                nameW.assign(fn.begin(), fn.end());
+
+                uiText.setFont(cardFont);
+                uiText.setCharacterSize(40);
+                uiText.setFillColor(sf::Color(220, 200, 240));
+                uiText.setString(sf::String(nameW));
+                sf::FloatRect tb = uiText.getLocalBounds();
+                float tx = centerX - (tb.position.x + tb.size.x) * 0.5f;
+                float ty = listStartY + idx * lineH;
+                uiText.setPosition({tx, ty});
+                window.draw(uiText);
+
+                // 保存点击检测区域
+                sf::FloatRect hitRect({tx - 10.f, ty}, {tb.size.x + 20.f, lineH});
+                historyItems.emplace_back(hitRect, p);
+                idx++;
+            }
+        }
+
+        // ── 底部提示 ──
+        uiText.setFont(cardFont);
+        uiText.setCharacterSize(36);
+        uiText.setFillColor(sf::Color(180, 160, 200));
+        uiText.setString(sf::String(L"点击条目加载复盘 · 点击空白返回"));
+        sf::FloatRect tb = uiText.getLocalBounds();
+        uiText.setPosition(sf::Vector2f(centerX - (tb.position.x + tb.size.x) * 0.5f, 1340.f));
+        window.draw(uiText);
     }
 
 }
@@ -2773,7 +3814,7 @@ bool GameEngine::hasValidActionPoint(bool isPieceDrop) const {
 // 3. 智能行动点扣除算法
 bool GameEngine::consumeActionPoint(bool isPieceDrop) {
     if (isPieceDrop) {
-        // 优先寻找“只能下棋，不能出牌”的【专能行动点】，从而将珍贵的“双能万能点”留到最后
+        // 优先寻找"只能下棋，不能出牌"的【专能行动点】，从而将珍贵的"双能万能点"留到最后
         for (auto it = currentTurnActionPoints.begin(); it != currentTurnActionPoints.end(); ++it) {
             if (it->canPieceDrop && !it->canPlayCard) {
                 currentTurnActionPoints.erase(it);
@@ -2781,7 +3822,7 @@ bool GameEngine::consumeActionPoint(bool isPieceDrop) {
                 return true;
             }
         }
-        // 如果没有专属点，再被迫消耗“双能行动点”
+        // 如果没有专属点，再被迫消耗"双能行动点"
         for (auto it = currentTurnActionPoints.begin(); it != currentTurnActionPoints.end(); ++it) {
             if (it->canPieceDrop && it->canPlayCard) {
                 currentTurnActionPoints.erase(it);
@@ -2791,7 +3832,7 @@ bool GameEngine::consumeActionPoint(bool isPieceDrop) {
         }
     } 
     else {
-        // 优先寻找“只能出牌，不能下棋”的【专能行动点】
+        // 优先寻找"只能出牌，不能下棋"的【专能行动点】
         for (auto it = currentTurnActionPoints.begin(); it != currentTurnActionPoints.end(); ++it) {
             if (!it->canPieceDrop && it->canPlayCard) {
                 currentTurnActionPoints.erase(it);
@@ -2833,6 +3874,7 @@ void GameEngine::settleActionPoints() {
         turnClock.restart();
         turnTimePaused = 0.f;  // 新回合，清零暂停累计
         isTurnPaused   = false;
+        isAiThinking   = false; // 切回合时清除 AI 思考标记
 
         // 自动为下一个接管回合的玩家刷新基础行动点
         initActionPointsForTurn();
@@ -2840,6 +3882,91 @@ void GameEngine::settleActionPoints() {
     else {
         std::cout << "[ActionPoint] 结算完成：仍有可用点数，请继续行动。⏳ 回合倒计时安全锁死，不予重置。" << std::endl;
     }
+}
+
+// ── 疫病处理：每回合传播 + 概率销毁 ──
+void GameEngine::processInfection() {
+    // 隔离倒计时
+    if (quarantineTimer > 0) {
+        quarantineTimer--;
+        std::cout << "[Quarantine] 隔离剩余回合: " << quarantineTimer << std::endl;
+        if (quarantineTimer == 0) {
+            // 清除所有疫病
+            for (int r = 0; r < 15; ++r)
+                for (int c = 0; c < 15; ++c) {
+                    infected[r][c] = false;
+                    infectionActive[r][c] = false;
+                }
+            quarantineTimer = -1;
+            std::cout << "[Quarantine] 隔离完成，所有疫病已清除！" << std::endl;
+            return;
+        }
+    }
+
+    // 收集当前感染棋子（仅活跃期才可传播）
+    std::vector<std::pair<int,int>> currentInfected;
+    std::vector<std::pair<int,int>> toActivate;  // 潜伏→活跃
+    for (int r = 0; r < 15; ++r) {
+        for (int c = 0; c < 15; ++c) {
+            if (!infected[r][c]) continue;
+            if (infectionActive[r][c]) {
+                currentInfected.push_back({r, c});
+            } else {
+                toActivate.push_back({r, c});  // 本回合进入活跃，不传播
+            }
+        }
+    }
+
+    // 潜伏→活跃
+    for (auto& p : toActivate) infectionActive[p.first][p.second] = true;
+
+    if (currentInfected.empty() && toActivate.empty()) return;
+
+    // 新感染标记（本回合新增，延迟写入避免连锁）
+    bool newInfected[15][15] = {};
+    std::vector<std::pair<int,int>> toDestroy;
+
+    for (auto& p : currentInfected) {
+        int r = p.first, c = p.second;
+        // 20% 概率销毁
+        if ((rand() % 100) < 20) {
+            toDestroy.push_back({r, c});
+            continue;
+        }
+
+        // 四方向感染尝试
+        int dr[] = {-1, 1, 0, 0};
+        int dc[] = {0, 0, -1, 1};
+        for (int d = 0; d < 4; ++d) {
+            int nr = r + dr[d], nc = c + dc[d];
+            if (nr < 0 || nr >= 15 || nc < 0 || nc >= 15) continue;
+            int piece = chessboard.getPiece(nr, nc);
+            if (piece == 0) continue;
+            if (infected[nr][nc]) continue;
+            if (newInfected[nr][nc]) continue;
+
+            // 感染概率：敌方（非疫病发起方）60%，我方（疫病发起方）40%
+            int infectThreshold = (piece == plagueOwner) ? 40 : 60;
+            if ((rand() % 100) < infectThreshold) {
+                newInfected[nr][nc] = true;
+            }
+        }
+    }
+
+    // 执行销毁
+    for (auto& p : toDestroy) {
+        int r = p.first, c = p.second;
+        infected[r][c] = false; infectionActive[r][c] = false;
+        if (chessboard.getPiece(r, c) != 0) {
+            chessboard.placeDirect(r, c, 0);
+            std::cout << "[Plague] 疫病销毁棋子 (" << r << "," << c << ")" << std::endl;
+        }
+    }
+
+    // 应用新感染
+    for (int r = 0; r < 15; ++r)
+        for (int c = 0; c < 15; ++c)
+            if (newInfected[r][c]) { infected[r][c] = true; infectionActive[r][c] = false; }
 }
 
 // 6. 卡牌效果分发器：湮灭完成后由 GameEngine 统一调度
@@ -2889,18 +4016,26 @@ bool GameEngine::applyCardEffect(const Card& card) {
                       << "）胜利条件改为 " << card.value << " 子连星。" << std::endl;
             return true;
         }
-        case CardEffect::CONVERT_PIECE:
+        case CardEffect::CONVERT_PIECE: {
             isSelectingPiece = true;
             selectPieceStep  = 1;
             selectPiecePlayer = currentTurn;
             std::cout << "[CardEffect] 笼络发动！请先选择己方棋子销毁。" << std::endl;
             return false;
+        }
         case CardEffect::SACRIFICE_HAND: {
-            // 破釜沉舟自身已在湮灭时进弃牌堆、从手牌移除
-            int otherCards = (int)playerDeck.hand.size();
+            bool isAI = (currentState == GameState::GAME_PVE && currentTurn != playerColorPref);
+            int otherCards = isAI ? (int)playerDeck.aiHand.size() : (int)playerDeck.hand.size();
             int destroyCount = (otherCards >= 3) ? 5 : (otherCards == 2 ? 3 : (otherCards == 1 ? 2 : 1));
             if (otherCards > 0) {
-                // 🌟 启动退牌动画（所有手牌同时走出生动画反向，1秒）
+                if (isAI) {
+                    // AI 手牌直接退库，无动画
+                    playerDeck.returnAiHandToDeck();
+                    std::cout << "[AI] 破釜沉舟！" << otherCards
+                              << "张AI手牌返还牌库，将销毁" << destroyCount << "颗敌方棋子。" << std::endl;
+                    executeSacrificeDestroy(destroyCount);
+                    return false;
+                }
                 isReturningHandToDeck = true;
                 returnHandToDeckClock.restart();
                 pendingSacrificeDestroys = destroyCount;
@@ -2908,11 +4043,33 @@ bool GameEngine::applyCardEffect(const Card& card) {
                 std::cout << "[CardEffect] 破釜沉舟！退牌动画启动，" << otherCards
                           << "张手牌返还牌库，将销毁" << destroyCount << "颗敌方棋子。" << std::endl;
             } else {
-                // 无其他手牌，直接进入销毁阶段
                 executeSacrificeDestroy(destroyCount);
             }
             return false;
         }
+        case CardEffect::PLAGUE: {
+            bool isAI = (currentState == GameState::GAME_PVE && currentTurn != playerColorPref);
+            if (isAI && aiPlayer) {
+                // AI 自动选敌方棋子感染
+                auto enemy = aiPlayer->chooseEnemyPieceToConvert(chessboard);
+                if (enemy.first >= 0) {
+                    infected[enemy.first][enemy.second] = true; infectionActive[enemy.first][enemy.second] = false;
+                    plagueOwner = currentTurn;
+                    std::cout << "[AI] 疫病发动！感染 (" << enemy.first << "," << enemy.second << ")" << std::endl;
+                }
+                return true;
+            }
+            // 玩家交互选子
+            isSelectingPiece = true;
+            selectPieceStep = 10;  // 用 10 表示疫病选子（区别于笼络的 1/2/3）
+            selectPiecePlayer = currentTurn;
+            std::cout << "[CardEffect] 疫病发动！请选择一颗敌方棋子感染。" << std::endl;
+            return false;
+        }
+        case CardEffect::QUARANTINE:
+            quarantineTimer = card.value;  // 3 回合
+            std::cout << "[CardEffect] 隔离发动！" << quarantineTimer << " 回合后清除所有疫病。" << std::endl;
+            return true;
         case CardEffect::REMOVE_OPPONENT:
             std::cout << "[CardEffect] REMOVE_OPPONENT 尚未实现，预留框架。" << std::endl;
             return true;

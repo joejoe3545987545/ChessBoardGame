@@ -81,6 +81,7 @@ void Chessboard::reset() {
     winCondition[2] = 5;
     pieceAnimType = 0;     // 清除棋子动画
     animRow = animCol = -1;
+    dropAnimating = false;   // 清除落子动画
 
     // 清除历史和回放状态
     moveHistory.clear();
@@ -397,6 +398,8 @@ void Chessboard::draw(sf::RenderTarget& target) {
             bool isAnimPiece = (i == animRow && j == animCol && pieceAnimType != 0);
             int displayColor = grid[i][j];
             if (displayColor == 0 && !isAnimPiece) continue;
+            // 落子动画期间跳过该格的静态棋子（由 drawDropAnim 绘制漂浮棋子）
+            if (i == dropAnimRow && j == dropAnimCol && dropAnimating) continue;
 
             // 获取动画进度
             float t = 0.f;
@@ -625,4 +628,65 @@ void Chessboard::finishPieceAnim() {
     pieceAnimType = 0;
     animRow = animCol = -1;
     pieceAnimJustDone = false;
+}
+
+// ===== 落子抛物线动画 =====
+void Chessboard::startDropAnim(int row, int col, int player) {
+    if (replaying) return;  // 复盘时不播放落子动画
+    dropAnimating = true;
+    dropAnimRow = row;
+    dropAnimCol = col;
+    dropAnimPlayer = player;
+    dropAnimClock.restart();
+}
+
+bool Chessboard::isDropAnimating() const {
+    return dropAnimating;
+}
+
+void Chessboard::drawDropAnim(sf::RenderTarget& target) {
+    if (!dropAnimating) return;
+
+    const float DURATION = 0.35f;
+    float raw = dropAnimClock.getElapsedTime().asSeconds() / DURATION;
+    if (raw > 1.f) raw = 1.f;  // 钳制，确保末帧正常绘制再结束
+
+    // 缓入：先快后慢（cubic ease-out）
+    float t = 1.f - (1.f - raw) * (1.f - raw) * (1.f - raw);
+
+    // 目标格子中心坐标
+    float targetX, targetY;
+    getGridPosition(dropAnimRow, dropAnimCol, targetX, targetY);
+
+    // 起始位置：偏右 5px，偏上 10px
+    float startX = targetX + 5.f;
+    float startY = targetY - 10.f;
+
+    // 抛物线弧高
+    const float ARC_HEIGHT = 25.f;
+
+    // 位移（弧顶高于起点，然后落到终点）
+    float x = startX + (targetX - startX) * t;
+    float y = startY + (targetY - startY) * t - ARC_HEIGHT * 4.f * t * (1.f - t);
+
+    // 缩放：1.1 → 1.0
+    float scale = 1.1f - 0.1f * t;
+
+    // 绘制棋子
+    sf::Sprite& sp = (dropAnimPlayer == 1) ? blackSprite : whiteSprite;
+    sf::Texture& tx = (dropAnimPlayer == 1) ? blackTexture : whiteTexture;
+    sf::Vector2u ts = tx.getSize();
+    if (ts.x == 0 || ts.y == 0) return;
+
+    float pieceSize = 68.4f * scale;
+    sp.setScale({pieceSize / (float)ts.x, pieceSize / (float)ts.y});
+    sp.setPosition({x, y});
+    sp.setTextureRect(sf::IntRect({0, 0}, {(int)ts.x, (int)ts.y}));
+    sp.setColor(sf::Color(255, 255, 255, 255));
+    target.draw(sp);
+
+    // 动画结束后标记完成，下一帧由 draw() 接管静态渲染
+    if (dropAnimClock.getElapsedTime().asSeconds() >= DURATION) {
+        dropAnimating = false;
+    }
 }
