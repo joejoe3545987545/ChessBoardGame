@@ -5,6 +5,20 @@
 #include <utility>
 #include <vector>
 
+// ── 碎片动画：棋子销毁时粉碎效果 ──
+struct Fragment {
+    sf::Vector2f pos;       // 世界坐标（粉碎=当前位置，聚合=散落→目标）
+    sf::Vector2f vel;       // 速度 (px/s)，粉碎用
+    sf::IntRect  texRect;   // 源纹理子区域
+    float rotation = 0.f;   // 当前旋转角度 (度)
+    float rotSpeed = 0.f;   // 旋转速度 (度/s)
+    float alpha = 255.f;    // 透明度
+    bool  released = false; // 擦除线已越过（粉碎）/ 已开始飞入（聚合）
+    sf::Vector2f targetPos = {0.f, 0.f}; // 聚合目标位置
+    float assembleTimer = 0.f;           // 聚合已用时间
+    float fadeTimer = 0.f;              // 淡出已用时间（缓入曲线用）
+};
+
 // 一个简单的 Move 结构：行、列、执子（1 黑、2 白）
 struct Move {
     int row;
@@ -118,6 +132,17 @@ private:
     bool dropAnimating = false;
     int  dropAnimRow = -1, dropAnimCol = -1, dropAnimPlayer = 0;
     sf::Clock dropAnimClock;
+
+    // 碎片动画缓存（12×12=144块）
+    std::vector<Fragment> blackFragments;   // 预计算的黑色棋子碎片布局
+    std::vector<Fragment> whiteFragments;   // 预计算的白色棋子碎片布局
+    std::vector<Fragment> activeFragments;   // 粉碎方运行时副本
+    std::vector<Fragment> convertFragments;  // 聚合方运行时副本（转化用）
+    std::vector<Fragment> decayFragments;    // 残留衰减碎片（动画结束/被覆盖后继续播放）
+    int  decayColor = 0;                    // 衰减碎片的颜色（1=黑 2=白 或 pieceAnimFrom）
+    float fragLastElapsed = 0.f;            // 粉碎方上一帧时间
+    float convFragLastElapsed = 0.f;        // 聚合方上一帧时间
+    void initFragmentCache();               // 构造函数中调用
 };
 
 #endif // CHESSBOARD_H

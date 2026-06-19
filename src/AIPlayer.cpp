@@ -412,8 +412,8 @@ int AIPlayer::countPieces(const Chessboard& chessboard, int pieceType) const {
 }
 
 int AIPlayer::evaluateCard(const Card& card, const Chessboard& chessboard) const {
-    // 紫卡优先出（负面效果给敌方）
-    if (card.cardColor == 1) return 120;
+    // 未标记紫卡可发送给敌方；已标记紫卡只能等条件消除
+    if (card.cardColor == 1) return card.transferred ? -999 : 110;
 
     int score = 0;
     int ownPieces = countPieces(chessboard, aiPiece);
@@ -494,7 +494,6 @@ bool AIPlayer::shouldPlayBeforeDrop(
 {
     for (const auto& c : aiHand) {
         if (c.effect == CardEffect::FORCE_DROP) return true;
-        if (c.cardColor == 1) return true; // 紫卡优先发送
         if (c.effect == CardEffect::CHANGE_WIN_RULE &&
             countPieces(chessboard, playerPiece) >= 8) return true;
     }

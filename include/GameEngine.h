@@ -78,6 +78,9 @@ private:
     bool isProfessionalMode;
     std::wstring winReason;
     bool isGameOver;
+    bool showAIDebug = false;            // F10 开发者调试：AI 手牌
+    bool playerInvincible = false;       // 调试：玩家无敌（AI 需 15 连）
+    bool playerInvinciblePlus = false;   // 调试：无敌 Plus（双方均不可胜）
     bool isPaused = false;               // 对局暂停（ESC 切换）
     sf::Clock pauseFadeClock;            // 暂停遮罩淡入计时
     bool isBusyAnimating = false;       // 🌟 卡牌动画期间锁定玩家操作和 AI
@@ -88,6 +91,7 @@ private:
     int  plagueOwner = 0;                // 疫病发起方（1=黑, 2=白），决定传播概率
     int  quarantineTimer = -1;           // 隔离倒计时（-1=未激活, 0=本回合完成, >0=剩余回合）
     void processInfection();             // 每回合处理疫病传播和销毁
+    void processPurpleCurses();          // 每回合处理紫卡诅咒效果（盲目等）
     bool isSelectingPiece = false;      // 🌟 笼络选子模式
     int  selectPieceStep  = 0;          // 1=选己方, 2=销毁动画中/等待, 3=转化动画中
     int  selectPiecePlayer = 0;         // 谁在选子
@@ -96,6 +100,37 @@ private:
     bool isBulkDestroying = false;      // 批量销毁进行中
     bool isReturningHandToDeck = false; // 🌟 破釜沉舟退牌动画中
     sf::Clock returnHandToDeckClock;    // 退牌动画计时器
+    std::vector<std::vector<Fragment>> returnDeckFrags; // 每张卡的碎片
+    std::vector<sf::Vector2f>          returnDeckPos;   // 每张卡的初始位置
+    std::vector<int>                   returnDeckTex;   // 每张卡的纹理类型
+    bool returnDeckInit = false;                         // 是否已初始化碎片
+    // 🌟 紫卡诅咒到期移除动画
+    bool curseRemoving = false;
+    int  curseRemovingIdx = -1;
+    sf::Clock curseRemoveClock;
+    std::vector<Fragment> curseRemoveFrags;
+    sf::Vector2f curseRemovePos;
+    int  curseRemoveTex = 0;
+    bool curseRemoveFragsInit = false;
+    // 🌟 卡牌碎片衰减缓冲区（动画结束后继续播放）
+    std::vector<Fragment> cardDecayFrags;
+    int  cardDecayTex = 0;
+    // 🌟 卡牌生成碎片聚合
+    bool cardBirthActive = false;
+    std::vector<Fragment> cardBirthFrags;
+    sf::Clock cardBirthClock;
+    int  cardBirthTex = 0;
+    sf::Vector2f cardBirthPos;
+    bool cardBirthInit = false;
+    // 🌟 展示动画碎片聚合
+    bool showcaseFragsInit = false;
+    std::vector<Fragment> showcaseFrags;
+    int  showcaseFragsTex = 0;
+    // 🌟 PIP 动画碎片状态
+    std::vector<Fragment> pipFrags;
+    bool pipFragsInit = false;
+    int  pipFragsTex = 0;
+    float pipFragsLastT = 0.f;
     int pendingSacrificeDestroys = 0;   // 退牌动画完成后待销毁的敌方棋子数
     bool isCardAttachedToMouse = false; // 🌟 标记卡牌是否吸附在鼠标上
     sf::Vector2f cardMouseOffset = {0.f, 0.f};
@@ -219,10 +254,11 @@ private:
     enum class CardAnnihilateState {
         NONE,            // 常态（没有触发湮灭）
         PAUSE_BEFORE,    // 阶段 1：点中后，在原地停顿 0.2 秒
-        MOVE_TO_200,     // 阶段 2：位移到 (640, 200)
-        PAUSE_AFTER,     // 阶段 3：在 (640, 200) 停顿 0.5 秒
-        MOVE_TO_ZERO,     // 阶段 4：缓慢向上移动到 (640, 0)
-        PAUSE_FINAL      // 新增阶段 5：在 70 的位置定格停顿 0.5 秒
+        SHATTER,         // 🌟 阶段 2：碎片销毁（自下往上粉碎）
+        MOVE_TO_200,     // （保留）位移到 (640, 200)
+        PAUSE_AFTER,     // （保留）停顿 0.5 秒
+        MOVE_TO_ZERO,     // （保留）滑入读卡器
+        PAUSE_FINAL      // （保留）
     };
 
     CardAnnihilateState annihilateState = CardAnnihilateState::NONE; // 当前湮灭状态
@@ -241,15 +277,32 @@ private:
     sf::Clock showcaseClock;            // 展示阶段独立时钟
 
     // 🌟 AI 出牌动画状态机
-    enum class AICardPlayState { IDLE, RISING, PAUSE_AT_CENTER, TO_READER, ANNIHILATING, SHOWCASING };
+    enum class AICardPlayState { IDLE, RISING, PAUSE_AT_CENTER, TO_READER, ANNIHILATING, SHOWCASING,
+                                PURPLE_FADE_OUT, PURPLE_SLOT_GEN };
     AICardPlayState aiCardPlayState = AICardPlayState::IDLE;
     sf::Clock aiCardPlayClock;
     sf::Vector2f aiCardAnimPos{300.f, 1230.f};
     int  aiPlayingCardIndex = -1;
     bool aiCardFromPortal = false;
+    bool aiCardIsPurpleTransfer = false;   // AI 正在传送紫卡给玩家
+    sf::Clock purpleShowcaseClock;         // 紫卡传送展示独立时钟
+    // 🌟 卡牌碎片销毁
+    std::vector<Fragment> cardFragCache;       // 橙卡碎片缓存（14×20）
+    std::vector<Fragment> cardFragCachePurple; // 紫卡碎片缓存
+    std::vector<Fragment> cardFragActive;      // 运行时卡牌碎片
+    sf::Clock cardShatterClock;
+    sf::Vector2f cardShatterPos;
+    float cardShatterLastT = 0.f;
+    int  cardShatterTex = 0;  // 0=橙 1=紫
+    void initCardFragmentCache();
+    // 🌟 选子悬停淡入淡出
+    int  hoverCellRow = -1, hoverCellCol = -1;  // 当前悬停棋子
+    sf::Clock hoverEnterClock;                   // 进入悬停计时
+    sf::Clock hoverLeaveClock;                   // 离开悬停计时
+    bool hoverIsLeaving = false;                 // 是否正在淡出
 
     // 🌟 紫卡传送动画
-    enum class PurpleSendState { IDLE, PAUSE_BEFORE, MOVE_TO_PORTAL };
+    enum class PurpleSendState { IDLE, MOVE_TO_POS, PAUSE_BEFORE, PAUSE_AFTER, MOVE_TO_PORTAL };
     PurpleSendState purpleSendState = PurpleSendState::IDLE;
     sf::Clock purpleSendClock;
     sf::Vector2f purpleSendPos{300.f, 1060.f};
@@ -282,6 +335,10 @@ private:
     bool        settingsMenuLoaded = false;
     sf::Texture virusTex;
     sf::Sprite  virusSpr{virusTex};
+    sf::Texture skullTex;
+    sf::Sprite  skullSpr{skullTex};   // 笼络销毁阶段悬停预览
+    sf::Texture ringTex;
+    sf::Sprite  ringSpr{ringTex};     // 笼络转化阶段悬停预览
     sf::Clock   menuPieceClock;   // 菜单棋子抛物线动画时钟
     sf::Clock   menuJitterClock;   // 菜单按钮悬停抖动时钟
     sf::Clock   menuGlitchClock;   // 乱码文字刷新时钟

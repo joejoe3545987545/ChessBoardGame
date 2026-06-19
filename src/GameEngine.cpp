@@ -155,6 +155,7 @@ GameEngine::GameEngine()
         purpleCardSprite->setOrigin({ps.x / 2.f, ps.y / 2.f});
         std::cout << "[UI] 紫卡底纹 Card_01.png 加载成功" << std::endl;
     }
+    initCardFragmentCache();
     // ===== 🌟 紧跟在 newCardSprite 初始化下方的卡槽初始化 =====
     if (cardSlotTexture.loadFromFile("assets/CardSlot.png")) { // 💡 确认好你的素材路径
         cardSlotSprite = new sf::Sprite(cardSlotTexture);
@@ -301,6 +302,14 @@ GameEngine::GameEngine()
     if (virusTex.loadFromFile(getEngineAssetPath("assets/virus.png"))) {
         virusSpr.setTexture(virusTex, true);
         virusSpr.setOrigin({virusTex.getSize().x / 2.f, virusTex.getSize().y / 2.f});
+    }
+    if (skullTex.loadFromFile(getEngineAssetPath("assets/skull.png"))) {
+        skullSpr.setTexture(skullTex, true);
+        skullSpr.setOrigin({skullTex.getSize().x / 2.f, skullTex.getSize().y / 2.f});
+    }
+    if (ringTex.loadFromFile(getEngineAssetPath("assets/ring.png"))) {
+        ringSpr.setTexture(ringTex, true);
+        ringSpr.setOrigin({ringTex.getSize().x / 2.f, ringTex.getSize().y / 2.f});
     }
     // 🌟 画中画初始化
     pipRT.resize({1280u, 720u});
@@ -456,6 +465,8 @@ void GameEngine::processEvents() {
         if (const auto* keyEv = event->getIf<sf::Event::KeyPressed>()) {
             if (keyEv->code == sf::Keyboard::Key::F11) {
                 toggleFullscreen();
+            } else if (keyEv->code == sf::Keyboard::Key::F10) {
+                showAIDebug = !showAIDebug;
             } else if (keyEv->code == sf::Keyboard::Key::Escape) {
                 if (currentState == GameState::GAME_PVP || currentState == GameState::GAME_PVE) {
                     isPaused = !isPaused;
@@ -511,18 +522,21 @@ void GameEngine::processEvents() {
                         chessboard.reset();
                         playerDeck.resetDeck();
             memset(infected, 0, sizeof(infected)); memset(infectionActive, 0, sizeof(infectionActive)); quarantineTimer = -1; plagueOwner = 0;
-            aiCardPlayState = AICardPlayState::IDLE; aiPlayingCardIndex = -1;
-                        
+            aiCardPlayState = AICardPlayState::IDLE; aiPlayingCardIndex = -1; aiCardIsPurpleTransfer = false;
+
                         currentTurn = 1;
                         isAiThinking = false;
                         isGameOver = false;
                         savedThisGame = false;
                         isPaused = false;
+                        playerInvincible = false;
+                        playerInvinciblePlus = false;
+                        showAIDebug = false;
                         isSelectingPiece = false;
                         selectPieceStep = 0;
                         pendingDestroys.clear();
                         isBulkDestroying = false;
-                        isReturningHandToDeck = false;
+                        isReturningHandToDeck = false; returnDeckInit = false; returnDeckFrags.clear(); returnDeckPos.clear(); returnDeckTex.clear(); curseRemoving = false; curseRemovingIdx = -1; curseRemoveFrags.clear(); curseRemoveFragsInit = false; cardDecayFrags.clear(); cardDecayTex = 0; cardBirthActive = false; cardBirthFrags.clear(); cardBirthInit = false; showcaseFragsInit = false; showcaseFrags.clear();
                         isCardAttachedToMouse = false;
                         attachedCardIndex = -1;
                         handSlotAssign.clear();
@@ -650,6 +664,12 @@ void GameEngine::processEvents() {
                         // 点击成功立刻加入手牌数据系统（三子或四子连线抽卡）
                         int dir = -1;
                         int pattern = chessboard.checkPattern(lastRow, lastCol, dir);
+                        // 盲目延后：三子连星延长移除回合
+                        if (pattern >= 3) {
+                            for (auto& c : playerDeck.hand)
+                                if (c.cardColor == 1 && c.transferred && c.effect == CardEffect::BLIND)
+                                    { c.value++; std::cout << "[Blind] 玩家三连，盲目延后至 " << c.value << " 回合" << std::endl; }
+                        }
                         if (pattern == 3 || pattern == 4) {
                             size_t before = playerDeck.hand.size();
                             playerDeck.drawCard();
@@ -720,7 +740,7 @@ void GameEngine::handleMenuClick(sf::Vector2i mousePos) {
             chessboard.reset();
             playerDeck.resetDeck();
             memset(infected, 0, sizeof(infected)); memset(infectionActive, 0, sizeof(infectionActive)); quarantineTimer = -1; plagueOwner = 0;
-            aiCardPlayState = AICardPlayState::IDLE; aiPlayingCardIndex = -1;
+            aiCardPlayState = AICardPlayState::IDLE; aiPlayingCardIndex = -1; aiCardIsPurpleTransfer = false;
             handSlotAssign.clear();
             attachedCardIndex = -1;
             isCardAttachedToMouse = false;
@@ -729,7 +749,7 @@ void GameEngine::handleMenuClick(sf::Vector2i mousePos) {
             selectPieceStep  = 0;
             pendingDestroys.clear();
             isBulkDestroying = false;
-            isReturningHandToDeck = false;
+            isReturningHandToDeck = false; returnDeckInit = false; returnDeckFrags.clear(); returnDeckPos.clear(); returnDeckTex.clear(); curseRemoving = false; curseRemovingIdx = -1; curseRemoveFrags.clear(); curseRemoveFragsInit = false; cardDecayFrags.clear(); cardDecayTex = 0; cardBirthActive = false; cardBirthFrags.clear(); cardBirthInit = false; showcaseFragsInit = false; showcaseFrags.clear();
             newCardJustDrawn = false;
             showcaseState = CardShowcaseState::NONE;
             annihilateState = CardAnnihilateState::NONE;
@@ -788,7 +808,7 @@ void GameEngine::handlePVEConfigClick(sf::Vector2i mousePos) {
             chessboard.reset();
             playerDeck.resetDeck();
             memset(infected, 0, sizeof(infected)); memset(infectionActive, 0, sizeof(infectionActive)); quarantineTimer = -1; plagueOwner = 0;
-            aiCardPlayState = AICardPlayState::IDLE; aiPlayingCardIndex = -1;
+            aiCardPlayState = AICardPlayState::IDLE; aiPlayingCardIndex = -1; aiCardIsPurpleTransfer = false;
             handSlotAssign.clear();
             attachedCardIndex = -1;
             isCardAttachedToMouse = false;
@@ -797,7 +817,7 @@ void GameEngine::handlePVEConfigClick(sf::Vector2i mousePos) {
             selectPieceStep  = 0;
             pendingDestroys.clear();
             isBulkDestroying = false;
-            isReturningHandToDeck = false;
+            isReturningHandToDeck = false; returnDeckInit = false; returnDeckFrags.clear(); returnDeckPos.clear(); returnDeckTex.clear(); curseRemoving = false; curseRemovingIdx = -1; curseRemoveFrags.clear(); curseRemoveFragsInit = false; cardDecayFrags.clear(); cardDecayTex = 0; cardBirthActive = false; cardBirthFrags.clear(); cardBirthInit = false; showcaseFragsInit = false; showcaseFrags.clear();
             newCardJustDrawn = false;
             showcaseState = CardShowcaseState::NONE;
             annihilateState = CardAnnihilateState::NONE;
@@ -855,7 +875,7 @@ bool GameEngine::handleHUDClick(sf::Vector2i mousePos) {
         }
 
         // 🔍 非吸附态拾取：先槽2后槽1，显式计算无lambda
-        if (!isCardAttachedToMouse) {
+        if (!isCardAttachedToMouse && !cardBirthActive) {
             // ── 槽2顶卡 ──
             if (slot2Top >= 0) {
                 int stack2 = 0;
@@ -911,7 +931,8 @@ bool GameEngine::handleHUDClick(sf::Vector2i mousePos) {
                 float pdy = mouseClickPos.y - 1060.f;
                 float pDist = std::sqrt(pdx * pdx + pdy * pdy);
                 bool isPurpleCard = (attachedCardIndex >= 0 && attachedCardIndex < static_cast<int>(playerDeck.hand.size()) &&
-                                    playerDeck.hand[attachedCardIndex].cardColor == 1);
+                                    playerDeck.hand[attachedCardIndex].cardColor == 1 &&
+                                    !playerDeck.hand[attachedCardIndex].transferred); // 已传送的不可再传
 
                 if (isPurpleCard && pDist <= zoneRadius) {
                     if (!hasValidActionPoint(false)) {
@@ -923,7 +944,9 @@ bool GameEngine::handleHUDClick(sf::Vector2i mousePos) {
                     }
                     // 紫卡传送：snap → 下滑 → 进入敌方手牌
                     isCardAttachedToMouse = false;
-                    startPurpleCardSend(attachedCardIndex);
+                    int sendIdx = attachedCardIndex;
+                    attachedCardIndex = -1;
+                    startPurpleCardSend(sendIdx);
                     return true;
                 }
 
@@ -1034,7 +1057,7 @@ void GameEngine::handlePauseMenuClick(sf::Vector2i mousePos) {
                 selectPieceStep = 0;
                 pendingDestroys.clear();
                 isBulkDestroying = false;
-                isReturningHandToDeck = false;
+                isReturningHandToDeck = false; returnDeckInit = false; returnDeckFrags.clear(); returnDeckPos.clear(); returnDeckTex.clear(); curseRemoving = false; curseRemovingIdx = -1; curseRemoveFrags.clear(); curseRemoveFragsInit = false; cardDecayFrags.clear(); cardDecayTex = 0; cardBirthActive = false; cardBirthFrags.clear(); cardBirthInit = false; showcaseFragsInit = false; showcaseFrags.clear();
                 if (newCardSprite) newCardSprite->setPosition({2260.f, 160.f});
                 battleMusic.stop();
                 battleMusic.play();
@@ -1044,7 +1067,7 @@ void GameEngine::handlePauseMenuClick(sf::Vector2i mousePos) {
                 winMusic.stop();
                 playerDeck.resetDeck();
             memset(infected, 0, sizeof(infected)); memset(infectionActive, 0, sizeof(infectionActive)); quarantineTimer = -1; plagueOwner = 0;
-            aiCardPlayState = AICardPlayState::IDLE; aiPlayingCardIndex = -1;
+            aiCardPlayState = AICardPlayState::IDLE; aiPlayingCardIndex = -1; aiCardIsPurpleTransfer = false;
                 currentTurn = 1;
                 initActionPointsForTurn();
                 showcaseState = CardShowcaseState::NONE;
@@ -1059,6 +1082,9 @@ void GameEngine::handlePauseMenuClick(sf::Vector2i mousePos) {
                     isAiThinking = true;
                     aiThinkClock.restart();
                 }
+                playerInvincible = false;
+                playerInvinciblePlus = false;
+                showAIDebug = false;
                 break;
             case 2: // 返回主页
                 battleMusic.stop();
@@ -1076,6 +1102,9 @@ void GameEngine::handlePauseMenuClick(sf::Vector2i mousePos) {
                 attachedCardIndex = -1;
                 handSlotAssign.clear();
                 currentTurnActionPoints.clear();
+                playerInvincible = false;
+                playerInvinciblePlus = false;
+                showAIDebug = false;
                 if (newCardSprite) newCardSprite->setPosition({2260.f, 160.f});
                 currentState = GameState::MENU;
                 break;
@@ -1164,6 +1193,7 @@ void GameEngine::update() {
             currentTurn != lastProcessedTurn && !isGameOver) {
             lastProcessedTurn = currentTurn;
             processInfection();
+            // processPurpleCurses 移至 settleActionPoints 确保每次换边都触发
         }
     }
 
@@ -1389,17 +1419,41 @@ void GameEngine::update() {
     if (currentState != GameState::GAME_PVP && currentState != GameState::GAME_PVE) return;
 
     // 🌟 破釜沉舟退牌动画完成处理
-    if (isReturningHandToDeck && returnHandToDeckClock.getElapsedTime().asSeconds() >= 1.0f) {
+    if (isReturningHandToDeck && returnHandToDeckClock.getElapsedTime().asSeconds() >= 2.0f) {
+        // 碎片移到衰减缓冲区（继续播放直到自然淡出）
+        for (auto& frags : returnDeckFrags)
+            for (auto& f : frags)
+                if (f.alpha > 0.f) cardDecayFrags.push_back(f);
+        if (!returnDeckTex.empty()) cardDecayTex = returnDeckTex[0];
         // 退牌动画结束，正式将手牌移回牌库
         for (size_t i = 0; i < playerDeck.hand.size(); ++i)
             playerDeck.deck.push_back(playerDeck.hand[i]);
         playerDeck.hand.clear();
         handSlotAssign.clear();
         attachedCardIndex = -1;
-        isReturningHandToDeck = false;
+        isReturningHandToDeck = false; returnDeckInit = false; returnDeckFrags.clear(); returnDeckPos.clear(); returnDeckTex.clear();
         std::cout << "[Sacrifice] 退牌动画完成，手牌已返还牌库。" << std::endl;
         // 进入销毁阶段
         executeSacrificeDestroy(pendingSacrificeDestroys);
+    }
+
+    // 🌟 紫卡诅咒到期移除动画完成
+    if (curseRemoving && curseRemoveClock.getElapsedTime().asSeconds() >= 2.0f) {
+        // 碎片移到衰减缓冲区
+        for (auto& f : curseRemoveFrags)
+            if (f.alpha > 0.f) cardDecayFrags.push_back(f);
+        cardDecayTex = curseRemoveTex;
+        // 正式移除卡牌
+        if (curseRemovingIdx >= 0 && curseRemovingIdx < (int)playerDeck.hand.size()) {
+            playerDeck.hand.erase(playerDeck.hand.begin() + curseRemovingIdx);
+            handSlotAssign.erase(handSlotAssign.begin() + curseRemovingIdx);
+            if (curseRemovingIdx == attachedCardIndex) attachedCardIndex = -1;
+        }
+        curseRemoving = false;
+        curseRemovingIdx = -1;
+        curseRemoveFrags.clear();
+        curseRemoveFragsInit = false;
+        std::cout << "[Blind] 玩家盲目移除动画完成" << std::endl;
     }
 
     // 🎬 棋子动画完成处理（笼络 + 批量销毁）
@@ -1418,7 +1472,7 @@ void GameEngine::update() {
                 chessboard.startDestroyAnim(p.first, p.second);
             } else {
                 isBulkDestroying = false;
-            isReturningHandToDeck = false;
+            isReturningHandToDeck = false; returnDeckInit = false; returnDeckFrags.clear(); returnDeckPos.clear(); returnDeckTex.clear(); curseRemoving = false; curseRemovingIdx = -1; curseRemoveFrags.clear(); curseRemoveFragsInit = false; cardDecayFrags.clear(); cardDecayTex = 0; cardBirthActive = false; cardBirthFrags.clear(); cardBirthInit = false; showcaseFragsInit = false; showcaseFrags.clear();
                 isBusyAnimating = false;
                 if (isTurnPaused) {
                     turnTimePaused += pauseClock.getElapsedTime().asSeconds();
@@ -1435,8 +1489,9 @@ void GameEngine::update() {
             chessboard.recordMove(ar, ac, 0);
             chessboard.finishPieceAnim();
             std::cout << "[Convert] 销毁完成。" << std::endl;
-            // AI 自动进入转化阶段
-            if (currentState == GameState::GAME_PVE && currentTurn != playerColorPref && aiPlayer) {
+            // AI 自动进入转化阶段（判断发起方是否为 AI）
+            bool aiStarted = (currentState == GameState::GAME_PVE && selectPiecePlayer != playerColorPref);
+            if (aiStarted && aiPlayer) {
                 auto enemy = aiPlayer->chooseEnemyPieceToConvert(chessboard);
                 if (enemy.first >= 0) {
                     chessboard.startConvertAnim(enemy.first, enemy.second,
@@ -1490,7 +1545,7 @@ void GameEngine::update() {
     }
 
     float elapsedSeconds = getEffectiveTurnTime();
-    if (elapsedSeconds >= 45.f) {
+    if (elapsedSeconds >= 45.f && !playerInvincible) {
         winReason = (currentTurn == 1) ? L"黑方思考超时，白方获胜！" : L"白方思考超时，黑方获胜！";
         isGameOver = true;
         currentState = GameState::GAME_OVER; // 🌟 触发游戏结束状态
@@ -1500,6 +1555,11 @@ void GameEngine::update() {
     // 紫卡传送动画驱动
     if (purpleSendState != PurpleSendState::IDLE) {
         updatePurpleCardSend();
+    }
+
+    // AI 出牌动画驱动（无论谁回合都要跑）
+    if (aiCardPlayState != AICardPlayState::IDLE) {
+        updateAICardAnimation();
     }
 
     // ── AI 回合状态机 ──
@@ -1552,12 +1612,24 @@ void GameEngine::update() {
         // 等待思考时间
         if (aiThinkClock.getElapsedTime().asSeconds() < 0.8f) return;
 
+        // ── 盲目效果：AI 随机决策 ──
+        bool aiBlindActive = false;
+        for (const auto& c : playerDeck.aiHand)
+            if (c.cardColor == 1 && c.transferred && c.effect == CardEffect::BLIND)
+                { aiBlindActive = true; break; }
+
         // ── 决策：先出牌再下棋？──
         bool hasCardAP = hasValidActionPoint(false);
-        if (hasCardAP && !playerDeck.aiHand.empty() &&
-            aiPlayer->shouldPlayCard(playerDeck.aiHand, chessboard, hasCardAP) &&
-            aiPlayer->shouldPlayBeforeDrop(playerDeck.aiHand, chessboard)) {
-            int idx = aiPlayer->chooseCardToPlay(playerDeck.aiHand, chessboard);
+        bool shouldPlay = hasCardAP && !playerDeck.aiHand.empty();
+        if (shouldPlay && !aiBlindActive) {
+            shouldPlay = aiPlayer->shouldPlayCard(playerDeck.aiHand, chessboard, hasCardAP) &&
+                         aiPlayer->shouldPlayBeforeDrop(playerDeck.aiHand, chessboard);
+        } else if (shouldPlay && aiBlindActive) {
+            shouldPlay = (rand() % 100) < 40; // 盲目时 40% 概率出牌
+        }
+        if (shouldPlay) {
+            int idx = aiBlindActive ? (rand() % playerDeck.aiHand.size())
+                                    : aiPlayer->chooseCardToPlay(playerDeck.aiHand, chessboard);
             if (idx >= 0 && idx < static_cast<int>(playerDeck.aiHand.size())) {
                 startAICardPlay(idx);
                 return;
@@ -1587,6 +1659,12 @@ void GameEngine::update() {
             // Pattern 检测 → AI 抽牌
             int dir = -1;
             int pattern = chessboard.checkPattern(aiRow, aiCol, dir);
+            // 盲目延后：AI 三子连星延长移除回合
+            if (pattern >= 3) {
+                for (auto& c : playerDeck.aiHand)
+                    if (c.cardColor == 1 && c.transferred && c.effect == CardEffect::BLIND)
+                        { c.value++; std::cout << "[Blind] AI 三连，盲目延后至 " << c.value << " 回合" << std::endl; }
+            }
             if (pattern == 3 || pattern == 4) {
                 size_t aiBefore = playerDeck.aiHand.size();
                 playerDeck.drawCardForAI();
@@ -1610,9 +1688,14 @@ void GameEngine::update() {
 
             // ── 决策：下棋后出牌？──
             hasCardAP = hasValidActionPoint(false);
-            if (hasCardAP && !playerDeck.aiHand.empty() &&
-                aiPlayer->shouldPlayCard(playerDeck.aiHand, chessboard, hasCardAP)) {
-                int idx = aiPlayer->chooseCardToPlay(playerDeck.aiHand, chessboard);
+            bool shouldPlayAfter = hasCardAP && !playerDeck.aiHand.empty();
+            if (shouldPlayAfter && !aiBlindActive)
+                shouldPlayAfter = aiPlayer->shouldPlayCard(playerDeck.aiHand, chessboard, hasCardAP);
+            else if (shouldPlayAfter && aiBlindActive)
+                shouldPlayAfter = (rand() % 100) < 40;
+            if (shouldPlayAfter) {
+                int idx = aiBlindActive ? (rand() % playerDeck.aiHand.size())
+                                        : aiPlayer->chooseCardToPlay(playerDeck.aiHand, chessboard);
                 if (idx >= 0 && idx < static_cast<int>(playerDeck.aiHand.size())) {
                     startAICardPlay(idx);
                     return;
@@ -1807,60 +1890,146 @@ void GameEngine::renderMenu() {
                 cardY = 200.f + (100.f - 200.f) * (dt / 0.7f);
                 if (dt >= 0.7f) { pipAnimState = 2; pipAnimClock.restart(); }
                 break;
-            case 2: { // ANNIHILATE
+            case 2: { // ANNIHILATE → 边滑动边粉碎
+                if (!pipFragsInit) {
+                    pipFrags = cardFragCache; pipFragsTex = 0;
+                    for (auto& frag : pipFrags) {
+                        frag.released = false; frag.alpha = 255.f; frag.fadeTimer = 0.f;
+                        frag.rotation = 0.f;
+                        frag.vel = {(rand()%200-100)*1.f, -(rand()%200+100)*1.f};
+                        frag.rotSpeed = (rand()%720-360)*1.f;
+                        frag.pos = {640.f, 200.f};
+                    }
+                    pipFragsInit = true; pipFragsLastT = 0.f;
+                }
                 float t = dt / 0.4f; if (t > 1.f) t = 1.f;
+                float st = t * t * (3.f - 2.f * t);
+                float curY = 200.f + (100.f - 200.f) * st; // 边滑动
                 cardY = 100.f;
-                cardScale = cs * (1.f - t);
-                cardAlpha = (uint8_t)(255 * (1.f - t));
-                if (dt >= 0.4f) { pipAnimState = 3; pipAnimClock.restart(); showCard = false; }
+                float pipClipH = newCardTexture.getSize().y * (1.f - st);
+                float pipScale = cs * 2.5f;
+                int clipH = (int)pipClipH;
+                if (clipH > 0) {
+                    newCardSprite->setScale({pipScale, pipScale});
+                    newCardSprite->setOrigin({newCardTexture.getSize().x/2.f, newCardTexture.getSize().y/2.f});
+                    newCardSprite->setTextureRect(sf::IntRect({0,0}, {(int)newCardTexture.getSize().x, clipH}));
+                    newCardSprite->setPosition({640.f, curY});
+                    newCardSprite->setColor(sf::Color(255,255,255,255));
+                    pipRT.draw(*newCardSprite);
+                }
+                float dtF = t - pipFragsLastT; pipFragsLastT = t;
+                if (dtF < 0.f) dtF = 0.f; if (dtF > 0.1f) dtF = 0.04f;
+                for (auto& frag : pipFrags) {
+                    if (!frag.released && (float)frag.texRect.position.y > pipClipH) {
+                        frag.released = true;
+                        float fcx = frag.texRect.size.x/2.f, fcy = frag.texRect.size.y/2.f;
+                        sf::Vector2u ts = newCardTexture.getSize();
+                        frag.pos.x = 640.f + (frag.texRect.position.x + fcx - ts.x/2.f) * pipScale;
+                        frag.pos.y = curY + (frag.texRect.position.y + fcy - ts.y/2.f) * pipScale;
+                    }
+                    if (frag.released) {
+                        frag.vel.y += 800.f * dtF; frag.pos += frag.vel * dtF;
+                        frag.rotation += frag.rotSpeed * dtF;
+                        frag.fadeTimer += dtF; float fp = frag.fadeTimer/0.85f; if (fp>1.f) fp=1.f;
+                        frag.alpha = 255.f*(1.f-fp*fp*(3.f-2.f*fp));
+                        float fcx=frag.texRect.size.x/2.f, fcy=frag.texRect.size.y/2.f;
+                        newCardSprite->setOrigin({fcx,fcy}); newCardSprite->setTextureRect(frag.texRect);
+                        newCardSprite->setPosition(frag.pos); newCardSprite->setRotation(sf::degrees(frag.rotation));
+                        newCardSprite->setColor(sf::Color(255,255,255,(uint8_t)frag.alpha));
+                        pipRT.draw(*newCardSprite);
+                        uint8_t g = (uint8_t)((1.f-fp)*100.f);
+                        if (g>0){newCardSprite->setColor(sf::Color(g,g,g,(uint8_t)frag.alpha));pipRT.draw(*newCardSprite, sf::BlendAdd);}
+                    }
+                }
+                newCardSprite->setOrigin({newCardTexture.getSize().x/2.f, newCardTexture.getSize().y/2.f});
+                showCard = false;
+                if (dt >= 0.4f) { pipAnimState = 3; pipAnimClock.restart(); pipFragsInit = false; }
                 break;
             }
             case 3: // SHOW_PAUSE
                 showCard = false;
                 if (dt >= 0.3f) { pipAnimState = 4; pipAnimClock.restart(); }
                 break;
-            case 4: { // SHOW_APPEAR
+            case 4: { // SHOW_APPEAR → 碎片聚合
+                if (!pipFragsInit) {
+                    pipFrags = cardFragCache; pipFragsTex = 0;
+                    for (auto& frag : pipFrags) {
+                        frag.released = false; frag.alpha = 0.f; frag.fadeTimer = 0.f;
+                        frag.rotation = (rand()%60-30)*1.f;
+                        frag.pos.x = 640.f + (rand()%200-100)*1.f;
+                        frag.pos.y = 650.f + (rand()%80)*1.f;
+                    }
+                    pipFragsInit = true; pipFragsLastT = 0.f;
+                }
                 float t = dt / 1.2f; if (t > 1.f) t = 1.f;
-                float et = 1.f - (1.f - t) * (1.f - t) * (1.f - t);
-                float sc = cs * 0.1f + (cs * 2.5f - cs * 0.1f) * et;
-                cardScale = sc;
-                cardX = 640.f; cardY = 450.f;
-            float whiteP = 1.f - t;  // 白光消退
-            sf::Vector2u ct2 = newCardTexture.getSize();
-            newCardSprite->setScale({sc, sc});
-            newCardSprite->setPosition({640.f, 450.f});
-            float clipH = ct2.y * et;
-            newCardSprite->setTextureRect(sf::IntRect({0, 0}, {(int)ct2.x, (int)clipH}));
-            newCardSprite->setColor(sf::Color(255,255,255,cardAlpha));
-            pipRT.draw(*newCardSprite);
-            uint8_t w = (uint8_t)(255 * whiteP);
-            newCardSprite->setColor(sf::Color(w,w,w,255));
-            pipRT.draw(*newCardSprite, sf::BlendAdd);
-            uiText.setFont(cardFont);
-            uiText.setCharacterSize((int)(36.f * sc / 0.36f));
-            uiText.setFillColor(sf::Color(255,255,255,cardAlpha));
-            uiText.setString(L"连击");
-            uiText.setPosition({640.f - 52.f * sc / 0.36f, 450.f - 164.f * sc / 0.36f});
-            pipRT.draw(uiText);
-            uiText.setCharacterSize((int)(27.f * sc / 0.36f));
-            uiText.setFillColor(sf::Color(230,230,230,cardAlpha));
-            uiText.setString(L"给予两次落子数");
-            uiText.setPosition({640.f - 88.f * sc / 0.36f, 450.f - 90.f * sc / 0.36f});
-            pipRT.draw(uiText);
-            uiText.setFont(font);
-            showCard = false;
-            if (dt >= 1.2f) { pipAnimState = 5; pipAnimClock.restart(); }
+                float pipScale2 = cs * 2.5f;
+                float wipeY = newCardTexture.getSize().y * t;
+                int visH = (int)wipeY;
+                if (visH > 0) {
+                    newCardSprite->setScale({pipScale2, pipScale2});
+                    newCardSprite->setOrigin({newCardTexture.getSize().x/2.f, newCardTexture.getSize().y/2.f});
+                    newCardSprite->setTextureRect(sf::IntRect({0,0}, {(int)newCardTexture.getSize().x, visH}));
+                    newCardSprite->setPosition({640.f, 450.f});
+                    newCardSprite->setColor(sf::Color(255,255,255,255));
+                    pipRT.draw(*newCardSprite);
+                }
+                float dtF2 = t - pipFragsLastT; pipFragsLastT = t;
+                if (dtF2 < 0.f) dtF2 = 0.f; if (dtF2 > 0.1f) dtF2 = 0.04f;
+                for (auto& frag : pipFrags) {
+                    float fcx = frag.texRect.size.x/2.f, fcy = frag.texRect.size.y/2.f;
+                    sf::Vector2u ts2 = newCardTexture.getSize();
+                    float tx = 640.f + (frag.texRect.position.x + fcx - ts2.x/2.f) * pipScale2;
+                    float ty = 450.f + (frag.texRect.position.y + fcy - ts2.y/2.f) * pipScale2;
+                    if (!frag.released && (float)frag.texRect.position.y < wipeY + ts2.y*0.06f && (float)frag.texRect.position.y >= wipeY - ts2.y*0.02f) {
+                        frag.released = true; frag.targetPos = {tx, ty}; frag.fadeTimer = 0.f;
+                        frag.pos.x = tx + (rand()%40-20)*1.f; frag.pos.y = ty + (rand()%30+20)*1.f;
+                    }
+                    if (frag.released) {
+                        frag.fadeTimer += dtF2; float prog = frag.fadeTimer/0.3f; if (prog>1.f) prog=1.f;
+                        float eased = prog*prog*(3.f-2.f*prog);
+                        frag.pos.x += (frag.targetPos.x-frag.pos.x)*0.12f;
+                        frag.pos.y += (frag.targetPos.y-frag.pos.y)*0.12f;
+                        frag.alpha = 255.f*eased;
+                        newCardSprite->setOrigin({fcx,fcy}); newCardSprite->setTextureRect(frag.texRect);
+                        newCardSprite->setPosition(frag.pos); newCardSprite->setRotation(sf::degrees(frag.rotation*(1.f-eased)));
+                        newCardSprite->setColor(sf::Color(255,255,255,(uint8_t)frag.alpha));
+                        pipRT.draw(*newCardSprite);
+                        float gb = eased<1.f ? eased*60.f : 0.f;
+                        if (gb>0.f){newCardSprite->setColor(sf::Color((uint8_t)gb,(uint8_t)gb,(uint8_t)gb,(uint8_t)frag.alpha));pipRT.draw(*newCardSprite, sf::BlendAdd);}
+                    }
+                }
+                newCardSprite->setOrigin({newCardTexture.getSize().x/2.f, newCardTexture.getSize().y/2.f});
+                // 文字逐行淡入
+                {   float txtT = t;
+                    auto txtA = [&](float yOff) -> uint8_t {
+                        float th = newCardTexture.getSize().y * 0.5f - yOff / pipScale2;
+                        float lineT = th / newCardTexture.getSize().y;
+                        if (txtT < lineT) return 0;
+                        float f = (txtT - lineT) / 0.08f; if (f>1.f) f=1.f;
+                        return (uint8_t)(255.f*f);
+                    };
+                    uiText.setFont(cardFont);
+                    uint8_t na = txtA(164.f*2.5f);
+                    if (na>0) { uiText.setCharacterSize((int)(36.f*pipScale2/0.36f)); uiText.setFillColor(sf::Color(255,255,255,na));
+                        uiText.setString(L"连击"); uiText.setPosition({640.f-52.f*pipScale2/0.36f, 450.f-164.f*pipScale2/0.36f}); pipRT.draw(uiText); }
+                    uint8_t da = txtA(90.f*2.5f);
+                    if (da>0) { uiText.setCharacterSize((int)(27.f*pipScale2/0.36f)); uiText.setFillColor(sf::Color(230,230,230,da));
+                        uiText.setString(L"给予两次落子数"); uiText.setPosition({640.f-88.f*pipScale2/0.36f, 450.f-90.f*pipScale2/0.36f}); pipRT.draw(uiText); }
+                    uiText.setFont(font);
+                }
+                showCard = false;
+                if (dt >= 1.2f) { pipAnimState = 5; pipAnimClock.restart(); pipFragsInit = false; }
                 break;
             }
-            case 5: // SHOW_DISPLAY
+            case 5: // SHOW_DISPLAY → 卡片定型
                 cardX = 640.f; cardY = 450.f; cardScale = cs * 2.5f;
                 if (dt >= 1.f) { pipAnimState = 6; pipAnimClock.restart(); }
                 break;
-            case 6: { // SHOW_FADE（纯透明度淡化）
+            case 6: { // SHOW_FADE → 纯透明度淡化
                 float t = dt / 0.5f; if (t > 1.f) t = 1.f;
                 cardX = 640.f; cardY = 450.f; cardScale = cs * 2.5f;
             cardAlpha = (uint8_t)(255 * (1.f - t));
-            if (dt >= 0.5f) { pipAnimNext(); }  // → 下一个动画
+            if (dt >= 0.5f) { pipAnimNext(); pipFragsInit = false; }
                 break;
             }
             }
@@ -1946,35 +2115,91 @@ void GameEngine::renderMenu() {
         if (pipAnimState == 6 || pipAnimState == 7) {
             float t = dt - moves[moveCount-1].t;
             if (t < 0.f) t = 0.f;
-            float heightPct = (pipAnimState == 6) ? (t / 1.0f) : 1.f;
-            if (heightPct > 1.f) heightPct = 1.f;
-            float whitePct = (pipAnimState == 6) ? (1.f - t / 1.5f) : 0.f;
-            if (whitePct < 0.f) whitePct = 0.f;
-            sf::Vector2u ct = newCardTexture.getSize();
-            int clipH = (int)(ct.y * heightPct);
-            newCardSprite->setScale({0.36f, 0.36f});
-            newCardSprite->setPosition({2260.f, 321.f});
-            newCardSprite->setTextureRect(sf::IntRect({0,0}, {(int)ct.x, clipH}));
-            newCardSprite->setColor(sf::Color(255,255,255,255));
-            pipRT.draw(*newCardSprite);
-            if (whitePct > 0.f) {
-                uint8_t w = (uint8_t)(255 * whitePct);
-                newCardSprite->setColor(sf::Color(w,w,w,255));
-                pipRT.draw(*newCardSprite, sf::BlendAdd);
+            if (pipAnimState == 6) {
+                if (!pipFragsInit) {
+                    pipFrags = cardFragCache; pipFragsTex = 0;
+                    for (auto& frag : pipFrags) {
+                        frag.released = false; frag.alpha = 0.f; frag.fadeTimer = 0.f;
+                        frag.rotation = (rand()%60-30)*1.f;
+                        frag.pos.x = 2260.f + (rand()%160-80)*1.f;
+                        frag.pos.y = 500.f + (rand()%80)*1.f;
+                    }
+                    pipFragsInit = true; pipFragsLastT = 0.f;
+                }
+                float rawT2 = t / 1.0f; if (rawT2 > 1.f) rawT2 = 1.f;
+                sf::Vector2u ct = newCardTexture.getSize();
+                float wipeY2 = ct.y * rawT2;
+                int visH2 = (int)wipeY2;
+                if (visH2 > 0) {
+                    newCardSprite->setScale({0.36f, 0.36f});
+                    newCardSprite->setOrigin({ct.x/2.f, ct.y/2.f});
+                    newCardSprite->setTextureRect(sf::IntRect({0,0}, {(int)ct.x, visH2}));
+                    newCardSprite->setPosition({2260.f, 321.f});
+                    newCardSprite->setColor(sf::Color(255,255,255,255));
+                    pipRT.draw(*newCardSprite);
+                }
+                float dtF3 = rawT2 - pipFragsLastT; pipFragsLastT = rawT2;
+                if (dtF3 < 0.f) dtF3 = 0.f; if (dtF3 > 0.1f) dtF3 = 0.04f;
+                for (auto& frag : pipFrags) {
+                    float fcx = frag.texRect.size.x/2.f, fcy = frag.texRect.size.y/2.f;
+                    float tx = 2260.f + (frag.texRect.position.x + fcx - ct.x/2.f) * 0.36f;
+                    float ty = 321.f + (frag.texRect.position.y + fcy - ct.y/2.f) * 0.36f;
+                    if (!frag.released && (float)frag.texRect.position.y < wipeY2 + ct.y*0.06f && (float)frag.texRect.position.y >= wipeY2 - ct.y*0.02f) {
+                        frag.released = true; frag.targetPos = {tx, ty}; frag.fadeTimer = 0.f;
+                        frag.pos.x = tx + (rand()%40-20)*1.f; frag.pos.y = ty + (rand()%30+20)*1.f;
+                    }
+                    if (frag.released) {
+                        frag.fadeTimer += dtF3; float prog = frag.fadeTimer/0.3f; if (prog>1.f) prog=1.f;
+                        float eased = prog*prog*(3.f-2.f*prog);
+                        frag.pos.x += (frag.targetPos.x-frag.pos.x)*0.12f;
+                        frag.pos.y += (frag.targetPos.y-frag.pos.y)*0.12f;
+                        frag.alpha = 255.f*eased;
+                        newCardSprite->setOrigin({fcx,fcy}); newCardSprite->setTextureRect(frag.texRect);
+                        newCardSprite->setPosition(frag.pos); newCardSprite->setRotation(sf::degrees(frag.rotation*(1.f-eased)));
+                        newCardSprite->setColor(sf::Color(255,255,255,(uint8_t)frag.alpha));
+                        pipRT.draw(*newCardSprite);
+                        float gb2 = eased<1.f ? eased*60.f : 0.f;
+                        if (gb2>0.f){newCardSprite->setColor(sf::Color((uint8_t)gb2,(uint8_t)gb2,(uint8_t)gb2,(uint8_t)frag.alpha));pipRT.draw(*newCardSprite, sf::BlendAdd);}
+                    }
+                }
+                newCardSprite->setOrigin({ct.x/2.f, ct.y/2.f});
+                // 文字逐行淡入
+                {   auto txtA2 = [&](float yOff) -> uint8_t {
+                        float th = ct.y*0.5f - yOff/0.36f;
+                        float lineT = th / ct.y; if (lineT<0.f) lineT=0.f;
+                        if (rawT2 < lineT) return 0;
+                        float f = (rawT2 - lineT)/0.08f; if (f>1.f) f=1.f;
+                        return (uint8_t)(255.f*f);
+                    };
+                    uiText.setFont(cardFont);
+                    uint8_t na2 = txtA2(164.f);
+                    if (na2>0){uiText.setCharacterSize(28);uiText.setFillColor(sf::Color(255,255,255,na2));uiText.setString(L"连击");uiText.setPosition({2260.f-52.f,321.f-164.f});pipRT.draw(uiText);}
+                    uint8_t da2 = txtA2(90.f);
+                    if (da2>0){uiText.setCharacterSize(22);uiText.setFillColor(sf::Color(230,230,230,da2));uiText.setString(L"给予两次落子数");uiText.setPosition({2260.f-88.f,321.f-90.f});pipRT.draw(uiText);}
+                    uiText.setFont(font);
+                }
+                if (rawT2 >= 1.f) { pipAnimState = 7; pipFragsInit = false; }
+            } else {
+                sf::Vector2u ct = newCardTexture.getSize();
+                newCardSprite->setScale({0.36f, 0.36f});
+                newCardSprite->setPosition({2260.f, 321.f});
+                newCardSprite->setTextureRect(sf::IntRect({0,0}, {(int)ct.x, (int)ct.y}));
+                newCardSprite->setColor(sf::Color(255,255,255,255));
+                pipRT.draw(*newCardSprite);
+                // 文字
+                uiText.setFont(cardFont);
+                uiText.setCharacterSize(28);
+                uiText.setFillColor(sf::Color(255,255,255,255));
+                uiText.setString(L"连击");
+                uiText.setPosition({2260.f - 52.f, 321.f - 164.f});
+                pipRT.draw(uiText);
+                uiText.setCharacterSize(22);
+                uiText.setFillColor(sf::Color(230,230,230,255));
+                uiText.setString(L"给予两次落子数");
+                uiText.setPosition({2260.f - 88.f, 321.f - 90.f});
+                pipRT.draw(uiText);
+                uiText.setFont(font);
             }
-            // 文字
-            uiText.setFont(cardFont);
-            uiText.setCharacterSize(28);
-            uiText.setFillColor(sf::Color(255,255,255,255));
-            uiText.setString(L"连击");
-            uiText.setPosition({2260.f - 52.f, 321.f - 164.f});
-            pipRT.draw(uiText);
-            uiText.setCharacterSize(22);
-            uiText.setFillColor(sf::Color(230,230,230,255));
-            uiText.setString(L"给予两次落子数");
-            uiText.setPosition({2260.f - 88.f, 321.f - 90.f});
-            pipRT.draw(uiText);
-            uiText.setFont(font);
         }
         newCardSprite->setScale({0.36f, 0.36f});
         pipRT.setView(pipView);
@@ -2376,13 +2601,15 @@ void GameEngine::startAICardPlay(int handIndex) {
 
     showcasedCard = playerDeck.aiHand[handIndex];
     aiPlayingCardIndex = handIndex;
+    aiCardIsPurpleTransfer = (showcasedCard.cardColor == 1);  // 紫卡走传送流程
     aiCardPlayState = AICardPlayState::RISING;
     aiCardPlayClock.restart();
     aiCardAnimPos = {300.f, 1230.f};  // CardPortal 位置
     isBusyAnimating = true;
     isTurnPaused = true;
     pauseClock.restart();
-    std::cout << "[AI] 开始出牌: " << showcasedCard.name.c_str() << std::endl;
+    std::cout << "[AI] 开始出牌: " << showcasedCard.name.c_str()
+              << (aiCardIsPurpleTransfer ? " [紫卡→传送]" : "") << std::endl;
 }
 
 void GameEngine::updateAICardAnimation() {
@@ -2403,10 +2630,16 @@ void GameEngine::updateAICardAnimation() {
         break;
     }
     case AICardPlayState::PAUSE_AT_CENTER: {
-        // 停在 Y=720 展示 1 秒
+        // 停在 Y=720 展示 1 秒；紫卡跳过 Reader 走传送展示
         aiCardAnimPos = {300.f, 720.f};
         if (elapsed >= 1.0f) {
-            aiCardPlayState = AICardPlayState::TO_READER;
+            if (aiCardIsPurpleTransfer) {
+                // 🌟 紫卡不走 Reader，淡出后走中央展示
+                aiCardPlayState = AICardPlayState::PURPLE_FADE_OUT;
+                purpleShowcaseClock.restart();
+            } else {
+                aiCardPlayState = AICardPlayState::TO_READER;
+            }
             aiCardPlayClock.restart();
         }
         break;
@@ -2444,9 +2677,48 @@ void GameEngine::updateAICardAnimation() {
     }
     case AICardPlayState::SHOWCASING: {
         // 等待展示 + 延迟效果全部完成（计时由 FADE_OUT/deferred handler 管理）
-        if (showcaseState == CardShowcaseState::NONE && !isBusyAnimating) {
+        if (showcaseState == CardShowcaseState::NONE) {
+            if (aiCardIsPurpleTransfer) {
+                // 🌟 紫卡：中央展示完成，进入卡槽生成阶段
+                aiCardPlayState = AICardPlayState::PURPLE_SLOT_GEN;
+                aiCardPlayClock.restart();
+            } else if (!isBusyAnimating) {
+                aiCardPlayState = AICardPlayState::IDLE;
+                std::cout << "[AI] 出牌动画完成" << std::endl;
+            }
+        }
+        break;
+    }
+    // ── 🌟 紫卡传送：y=720 淡出 → 中央展示 → 玩家卡槽生成 ──
+    case AICardPlayState::PURPLE_FADE_OUT: {
+        // 0.5s 透明度淡出，然后触发中央展示
+        aiCardAnimPos = {300.f, 720.f};
+        if (elapsed >= 0.5f) {
+            // 从 AI 手牌移除
+            playerDeck.aiDiscardCard(aiPlayingCardIndex);
+            aiPlayingCardIndex = -1;
+            // 触发中央展示（紫卡/橙卡共用，通过 aiCardIsPurpleTransfer 区分精灵）
+            showcaseState = CardShowcaseState::PAUSE;
+            showcaseClock.restart();
+            aiCardPlayState = AICardPlayState::SHOWCASING;
+            aiCardPlayClock.restart();
+            std::cout << "[AI] 紫卡淡出完成，进入中央展示" << std::endl;
+        }
+        break;
+    }
+    case AICardPlayState::PURPLE_SLOT_GEN: {
+        // 等待出生动画完成
+        if (!isAnimatingCard) {
             aiCardPlayState = AICardPlayState::IDLE;
-            std::cout << "[AI] 出牌动画完成" << std::endl;
+            aiCardIsPurpleTransfer = false;
+            isBusyAnimating = false;
+            if (isTurnPaused) {
+                turnTimePaused += pauseClock.getElapsedTime().asSeconds();
+                isTurnPaused = false;
+            }
+            consumeActionPoint(false);
+            settleActionPoints();
+            std::cout << "[AI] 紫卡传送完成" << std::endl;
         }
         break;
     }
@@ -2457,10 +2729,10 @@ void GameEngine::updateAICardAnimation() {
 // ── 紫卡传送动画 ──
 void GameEngine::startPurpleCardSend(int handIndex) {
     if (handIndex < 0 || handIndex >= static_cast<int>(playerDeck.hand.size())) return;
-    purpleSendState = PurpleSendState::PAUSE_BEFORE;
+    purpleSendState = PurpleSendState::MOVE_TO_POS;
     purpleSendClock.restart();
     purpleSendIndex = handIndex;
-    purpleSendPos = {300.f, 1060.f}; // snap 到 Portal 检测区中心
+    purpleSendPos = newCardSprite->getPosition(); // 从当前释放位置出发
     isBusyAnimating = true;
     if (!isTurnPaused) { isTurnPaused = true; pauseClock.restart(); }
     std::cout << "[PurpleSend] 紫卡传送启动" << std::endl;
@@ -2469,9 +2741,30 @@ void GameEngine::startPurpleCardSend(int handIndex) {
 void GameEngine::updatePurpleCardSend() {
     float elapsed = purpleSendClock.getElapsedTime().asSeconds();
     switch (purpleSendState) {
+    case PurpleSendState::MOVE_TO_POS: {
+        // 指数缓动到 Portal 检测区中心（与橙卡 MOVE_TO_200 同款）
+        sf::Vector2f target(300.f, 1060.f);
+        purpleSendPos.x += (target.x - purpleSendPos.x) * 0.07f;
+        purpleSendPos.y += (target.y - purpleSendPos.y) * 0.07f;
+        float dist = std::sqrt((target.x - purpleSendPos.x) * (target.x - purpleSendPos.x) +
+                               (target.y - purpleSendPos.y) * (target.y - purpleSendPos.y));
+        if (dist < 0.5f) {
+            purpleSendPos = target;
+            purpleSendState = PurpleSendState::PAUSE_BEFORE;
+            purpleSendClock.restart();
+        }
+        break;
+    }
     case PurpleSendState::PAUSE_BEFORE:
-        purpleSendPos = {300.f, 1060.f}; // 吸附在检测区中心
+        purpleSendPos = {300.f, 1060.f};
         if (elapsed >= 0.2f) {
+            purpleSendState = PurpleSendState::PAUSE_AFTER;
+            purpleSendClock.restart();
+        }
+        break;
+    case PurpleSendState::PAUSE_AFTER:
+        purpleSendPos = {300.f, 1060.f}; // 定住（与橙卡 PAUSE_AFTER 对称）
+        if (elapsed >= 0.5f) {
             purpleSendState = PurpleSendState::MOVE_TO_PORTAL;
             purpleSendClock.restart();
         }
@@ -2486,10 +2779,11 @@ void GameEngine::updatePurpleCardSend() {
             // 传送完成：卡牌给敌方，立即清理
             if (purpleSendIndex >= 0 && purpleSendIndex < static_cast<int>(playerDeck.hand.size())) {
                 Card sentCard = playerDeck.hand[purpleSendIndex];
+                sentCard.transferred = true; // 打上传送标记
                 playerDeck.hand.erase(playerDeck.hand.begin() + purpleSendIndex);
                 handSlotAssign.erase(handSlotAssign.begin() + purpleSendIndex);
                 playerDeck.aiHand.push_back(sentCard);
-                std::cout << "[PurpleSend] 紫卡已传送给敌方" << std::endl;
+                std::cout << "[PurpleSend] 紫卡已传送给敌方（已标记）" << std::endl;
             }
             purpleSendState = PurpleSendState::IDLE;
             purpleSendIndex = -1;
@@ -2508,6 +2802,22 @@ void GameEngine::updatePurpleCardSend() {
 }
 
 void GameEngine::renderGameplay() {
+    // ── 盲目效果：乱码文字池 ──
+    const std::wstring blindPool = L"连击给两次数落子隐忍迫使敌为胜途方承六星受笼络销毁己一个棋转化破釜沉舟将手牌放回库根据量疫病指定颗患上概率死亡试图传染给其他也风险隔离在后痊愈盲目";
+    auto scrambleText = [&](const std::wstring& src) {
+        std::wstring out = src;
+        for (auto& ch : out) if (ch != L'\n') ch = blindPool[rand() % blindPool.size()];
+        return out;
+    };
+    bool playerBlindActive = false;
+    for (const auto& c : playerDeck.hand)
+        if (c.cardColor == 1 && c.transferred && c.effect == CardEffect::BLIND)
+            { playerBlindActive = true; break; }
+    bool aiBlindForDebug = false;
+    for (const auto& c : playerDeck.aiHand)
+        if (c.cardColor == 1 && c.transferred && c.effect == CardEffect::BLIND)
+            { aiBlindForDebug = true; break; }
+
     // ── 背景：星空帧动画 ──
     // ── Universe 背景（本界面独立加载，每帧缓存）──
     {
@@ -2554,49 +2864,82 @@ void GameEngine::renderGameplay() {
         }
     }
 
-    // ── 紫卡传送动画渲染 ──
-    if (purpleSendState != PurpleSendState::IDLE && purpleCardSprite &&
-        purpleSendIndex >= 0 && purpleSendIndex < static_cast<int>(playerDeck.hand.size())) {
-        sf::Vector2u ts = purpleCardTexture.getSize();
-        purpleCardSprite->setScale({0.36f, 0.36f});
-        purpleCardSprite->setPosition(purpleSendPos);
-        purpleCardSprite->setTextureRect(sf::IntRect({0,0}, {(int)ts.x, (int)ts.y}));
-        purpleCardSprite->setColor(sf::Color(255, 255, 255, 255));
-        window.draw(*purpleCardSprite);
-        // 卡牌文字
-        const auto& pc = playerDeck.hand[purpleSendIndex];
-        uiText.setFont(cardFont);
-        uiText.setCharacterSize(28);
-        uiText.setFillColor(sf::Color(255, 255, 255, 255));
-        uiText.setString(pc.name);
-        uiText.setPosition({purpleSendPos.x - 52.f, purpleSendPos.y - 164.f});
-        window.draw(uiText);
-        uiText.setCharacterSize(22);
-        uiText.setFillColor(sf::Color(230, 230, 230, 255));
-        uiText.setString(pc.description);
-        uiText.setPosition({purpleSendPos.x - 88.f, purpleSendPos.y - 90.f});
-        window.draw(uiText);
-        uiText.setFont(font);
-    }
+    // ── 🌟 选子悬停预览（疫病/笼络销毁/笼络转化）统一淡入淡出 ──
+    if (isSelectingPiece) {
+        // 1. 判断当前选子模式（三种互斥）
+        int hoverMode = 0; // 0=无, 1=疫病virus, 2=笼络销毁skull, 3=笼络转化ring
+        if (selectPieceStep == 10 && virusTex.getSize().x > 0) hoverMode = 1;
+        else if (selectPieceStep == 1 && skullTex.getSize().x > 0) hoverMode = 2;
+        else if (selectPieceStep == 2 && !isBusyAnimating && ringTex.getSize().x > 0) hoverMode = 3;
 
-    // ── AI 出牌动画（CardPortal → Reader，SHOWCASING 时由展示接管）──
-    if (aiCardPlayState != AICardPlayState::IDLE &&
-        aiCardPlayState != AICardPlayState::SHOWCASING && newCardSprite) {
-        sf::Vector2u ts = newCardTexture.getSize();
-        newCardSprite->setScale({0.36f, 0.36f});
-        newCardSprite->setPosition(aiCardAnimPos);
-        newCardSprite->setTextureRect(sf::IntRect({0,0}, {(int)ts.x, (int)ts.y}));
-        newCardSprite->setColor(sf::Color(255, 255, 255, 255));
-        window.draw(*newCardSprite);
+        if (hoverMode > 0) {
+            sf::Vector2i mpix = sf::Mouse::getPosition(window);
+            sf::Vector2f mpos = window.mapPixelToCoords(mpix);
+            const float BW = 15.f * 72.f;
+            float bx = (2560.f - BW) * 0.5f + 36.f;
+            float by = (1440.f - BW) * 0.5f + 36.f;
+            int hc = static_cast<int>(std::round((mpos.x - bx) / 72.f));
+            int hr = static_cast<int>(std::round((mpos.y - by) / 72.f));
 
-        // 卡牌文字
-        uiText.setFont(cardFont);
-        uiText.setCharacterSize(28);
-        uiText.setFillColor(sf::Color(255, 255, 255, 255));
-        uiText.setString(showcasedCard.name);
-        uiText.setPosition({aiCardAnimPos.x - 52.f, aiCardAnimPos.y - 164.f});
-        window.draw(uiText);
-        uiText.setFont(font);
+            // 2. 检查悬停棋子合法性
+            int curRow = -1, curCol = -1;
+            if (hr >= 0 && hr < 15 && hc >= 0 && hc < 15) {
+                int piece = chessboard.getPiece(hr, hc);
+                bool valid = false;
+                if (hoverMode == 1)      valid = (piece != 0 && piece != selectPiecePlayer);
+                else if (hoverMode == 2) valid = (piece == selectPiecePlayer);
+                else if (hoverMode == 3) valid = (piece != 0 && piece != selectPiecePlayer);
+                if (valid) { curRow = hr; curCol = hc; }
+            }
+
+            // 3. 淡入淡出状态机
+            if (curRow >= 0) {
+                if (curRow != hoverCellRow || curCol != hoverCellCol) {
+                    hoverEnterClock.restart();
+                    hoverIsLeaving = false;
+                    hoverCellRow = curRow; hoverCellCol = curCol;
+                }
+            } else if (hoverCellRow >= 0 && !hoverIsLeaving) {
+                hoverLeaveClock.restart();
+                hoverIsLeaving = true;
+            }
+
+            // 4. 计算当前 alpha（0.15s 淡入/淡出）
+            const uint8_t BASE = 204;
+            uint8_t alpha = 0;
+            if (hoverIsLeaving) {
+                float lt = hoverLeaveClock.getElapsedTime().asSeconds();
+                float fade = 1.f - (lt / 0.15f);
+                if (fade <= 0.f) { hoverCellRow = -1; hoverCellCol = -1; hoverIsLeaving = false; }
+                else alpha = static_cast<uint8_t>(BASE * fade);
+            } else if (hoverCellRow >= 0) {
+                float et = hoverEnterClock.getElapsedTime().asSeconds();
+                float fade = et / 0.15f;
+                if (fade > 1.f) fade = 1.f;
+                alpha = static_cast<uint8_t>(BASE * fade);
+            }
+
+            // 5. 绘制对应图标
+            if (alpha > 0 && hoverCellRow >= 0) {
+                float ix, iy;
+                chessboard.getGridPosition(hoverCellRow, hoverCellCol, ix, iy);
+                sf::Sprite* spr = nullptr;
+                const sf::Texture* tex = nullptr;
+                if (hoverMode == 1)      { spr = &virusSpr; tex = &virusTex; }
+                else if (hoverMode == 2) { spr = &skullSpr; tex = &skullTex; }
+                else if (hoverMode == 3) { spr = &ringSpr;  tex = &ringTex;  }
+                if (spr && tex && tex->getSize().x > 0) {
+                    float s = 60.f / tex->getSize().x;
+                    spr->setScale({s, s});
+                    spr->setPosition({ix, iy});
+                    spr->setColor(sf::Color(255, 255, 255, alpha));
+                    window.draw(*spr);
+                }
+            }
+        } else {
+            // 模式不存在或切换时重置悬停状态
+            hoverCellRow = -1; hoverCellCol = -1; hoverIsLeaving = false;
+        }
     }
 
     // 🌟【独立 UI 层：卡槽背景常驻】
@@ -2623,15 +2966,160 @@ void GameEngine::renderGameplay() {
         }
     }
 
+    // ── 紫卡传送动画（Bottom 之上、Top 之下）──
+    if (purpleSendState != PurpleSendState::IDLE && purpleCardSprite &&
+        purpleSendIndex >= 0 && purpleSendIndex < static_cast<int>(playerDeck.hand.size())) {
+        sf::Vector2u ts = purpleCardTexture.getSize();
+        purpleCardSprite->setScale({0.36f, 0.36f});
+        purpleCardSprite->setPosition(purpleSendPos);
+        purpleCardSprite->setTextureRect(sf::IntRect({0,0}, {(int)ts.x, (int)ts.y}));
+        purpleCardSprite->setColor(sf::Color(255, 255, 255, 255));
+        window.draw(*purpleCardSprite);
+        const auto& pc = playerDeck.hand[purpleSendIndex];
+        uiText.setFont(cardFont);
+        uiText.setCharacterSize(28);
+        uiText.setFillColor(sf::Color(255, 255, 255, 255));
+        uiText.setString(pc.name);
+        uiText.setPosition({purpleSendPos.x - 52.f, purpleSendPos.y - 164.f});
+        window.draw(uiText);
+        uiText.setCharacterSize(22);
+        uiText.setFillColor(sf::Color(230, 230, 230, 255));
+        uiText.setString(pc.description);
+        uiText.setPosition({purpleSendPos.x - 88.f, purpleSendPos.y - 90.f});
+        window.draw(uiText);
+        uiText.setFont(font);
+    }
+
+    // ── AI 出牌动画（Bottom 之上、Top 之下）──
+    // 跳过 PURPLE_SLOT_GEN（卡已在玩家卡槽）和 SHOWCASING（由中央展示处理）
+    if (aiCardPlayState != AICardPlayState::IDLE &&
+        aiCardPlayState != AICardPlayState::SHOWCASING &&
+        aiCardPlayState != AICardPlayState::PURPLE_SLOT_GEN) {
+
+        // 🌟 紫卡传送全程使用紫卡底纹
+        bool isPurple = aiCardIsPurpleTransfer;
+        sf::Sprite*  useSpr = (isPurple && purpleCardSprite) ? purpleCardSprite : newCardSprite;
+        sf::Texture& useTex = (isPurple && purpleCardSprite) ? purpleCardTexture : newCardTexture;
+        sf::Vector2u ts = useTex.getSize();
+
+        if (aiCardPlayState == AICardPlayState::PURPLE_FADE_OUT) {
+            // 🌟 紫卡在 y=720 透明度淡出（0.5s）
+            float ft = purpleShowcaseClock.getElapsedTime().asSeconds();
+            float alpha = 1.f - (ft / 0.5f);
+            if (alpha < 0.f) alpha = 0.f;
+            useSpr->setScale({0.36f, 0.36f});
+            useSpr->setPosition({300.f, 720.f});
+            useSpr->setTextureRect(sf::IntRect({0,0}, {(int)ts.x, (int)ts.y}));
+            useSpr->setColor(sf::Color(255, 255, 255, (uint8_t)(255 * alpha)));
+            window.draw(*useSpr);
+        } else {
+            // ── 普通 AI 出牌 / 紫卡滑动：小卡沿路径移动 ──
+            useSpr->setScale({0.36f, 0.36f});
+            useSpr->setPosition(aiCardAnimPos);
+            useSpr->setTextureRect(sf::IntRect({0,0}, {(int)ts.x, (int)ts.y}));
+            useSpr->setColor(sf::Color(255, 255, 255, 255));
+            window.draw(*useSpr);
+            uiText.setFont(cardFont);
+            uiText.setCharacterSize(28);
+            uiText.setFillColor(sf::Color(255, 255, 255, 255));
+            uiText.setString(showcasedCard.name);
+            uiText.setPosition({aiCardAnimPos.x - 52.f, aiCardAnimPos.y - 164.f});
+            window.draw(uiText);
+            // 描述逐行（5行以内，与卡槽渲染一致）
+            uiText.setCharacterSize(22);
+            uiText.setFillColor(sf::Color(230, 230, 230, 255));
+            {
+                std::wstring desc = showcasedCard.description;
+                size_t pos = 0; int li = 0; const float lh = 26.f;
+                while (pos <= desc.size() && li < 6) {
+                    size_t nl = desc.find(L'\n', pos);
+                    if (nl == std::wstring::npos) nl = desc.size();
+                    uiText.setString(sf::String(desc.substr(pos, nl - pos)));
+                    uiText.setPosition({aiCardAnimPos.x - 88.f, aiCardAnimPos.y - 90.f + li * lh});
+                    window.draw(uiText);
+                    pos = nl + 1; li++;
+                }
+            }
+            uiText.setFont(font);
+        }
+    }
+
     // 🌟【动态交互层：多卡堆叠渲染】
     if (currentState == GameState::GAME_PVP || currentState == GameState::GAME_PVE) {
         if (newCardSprite != nullptr && !playerDeck.hand.empty()) {
+
+            // 重置卡牌精灵状态（防展示残留 scale=0.76 污染手牌渲染）
+            sf::Vector2u nts = newCardTexture.getSize();
+            newCardSprite->setScale({0.36f, 0.36f});
+            newCardSprite->setOrigin({nts.x / 2.f, nts.y / 2.f});
+            newCardSprite->setTextureRect(sf::IntRect({0, 0}, {(int)nts.x, (int)nts.y}));
+            if (purpleCardSprite) {
+                sf::Vector2u pts = purpleCardTexture.getSize();
+                purpleCardSprite->setScale({0.36f, 0.36f});
+                purpleCardSprite->setOrigin({pts.x / 2.f, pts.y / 2.f});
+                purpleCardSprite->setTextureRect(sf::IntRect({0, 0}, {(int)pts.x, (int)pts.y}));
+            }
 
             // 【时序捕获】：抽卡标记触发出生动画（比 handSize 变化更可靠）
             if (newCardJustDrawn) {
                 cardAnimClock.restart();
                 isAnimatingCard = true;
                 newCardJustDrawn = false;
+                // 🌟 启动碎片聚合出生动画
+                cardBirthActive = true;
+                cardBirthClock.restart();
+                cardBirthInit = false;
+            }
+
+            // 🌟 卡牌出生碎片聚合：首次渲染帧初始化
+            if (cardBirthActive && !cardBirthInit && !playerDeck.hand.empty()) {
+                int lastIdx = (int)playerDeck.hand.size() - 1;
+                bool isP3 = (playerDeck.hand[lastIdx].cardColor == 1);
+                cardBirthFrags = isP3 ? cardFragCachePurple : cardFragCache;
+                cardBirthTex = playerDeck.hand[lastIdx].cardColor;
+                for (auto& frag : cardBirthFrags) {
+                    frag.released = false; frag.alpha = 0.f; frag.fadeTimer = 0.f;
+                    frag.rotation = (rand() % 60 - 30) * 1.f;
+                    frag.pos.x = 2260.f + (rand() % 200 - 100) * 1.f; // 卡槽附近散落
+                    frag.pos.y = 1200.f + (rand() % 200) * 1.f;        // 下方散落
+                }
+                cardBirthInit = true;
+            }
+
+            // 🌟 破釜沉舟退牌：首次渲染帧初始化所有卡牌碎片
+            if (isReturningHandToDeck && !returnDeckInit) {
+                cardDecayFrags.clear();
+                size_t n = playerDeck.hand.size();
+                returnDeckFrags.resize(n);
+                returnDeckPos.resize(n);
+                returnDeckTex.resize(n);
+                for (size_t k = 0; k < n; ++k) {
+                    bool isP = (playerDeck.hand[k].cardColor == 1);
+                    returnDeckFrags[k] = isP ? cardFragCachePurple : cardFragCache;
+                    returnDeckTex[k] = playerDeck.hand[k].cardColor;
+                    for (auto& frag : returnDeckFrags[k]) {
+                        frag.released = false; frag.alpha = 255.f; frag.fadeTimer = 0.f;
+                        frag.rotation = 0.f;
+                        frag.vel = {(rand()%200-100)*1.f, -(rand()%200+100)*1.f};
+                        frag.rotSpeed = (rand()%720-360)*1.f;
+                    }
+                }
+                returnDeckInit = true;
+            }
+
+            // 🌟 紫卡诅咒到期移除：首次渲染帧初始化碎片
+            if (curseRemoving && !curseRemoveFragsInit && curseRemovingIdx >= 0 && curseRemovingIdx < (int)playerDeck.hand.size()) {
+                cardDecayFrags.clear(); // 清掉可能残留的旧衰减碎片
+                bool isP2 = (playerDeck.hand[curseRemovingIdx].cardColor == 1);
+                curseRemoveFrags = isP2 ? cardFragCachePurple : cardFragCache;
+                curseRemoveTex = playerDeck.hand[curseRemovingIdx].cardColor;
+                for (auto& frag : curseRemoveFrags) {
+                    frag.released = false; frag.alpha = 255.f; frag.fadeTimer = 0.f;
+                    frag.rotation = 0.f;
+                    frag.vel = {(rand()%200-100)*1.f, -(rand()%200+100)*1.f};
+                    frag.rotSpeed = (rand()%720-360)*1.f;
+                }
+                curseRemoveFragsInit = true;
             }
 
             // 获取出生动画当前消耗的时间（仅顶卡使用）
@@ -2664,6 +3152,8 @@ void GameEngine::renderGameplay() {
                     if (static_cast<int>(i) == activeIdx) {
                         targetPos = cardPos; // 活跃卡回归点
                     } else {
+                        // 紫卡传送期间跳过该卡静态渲染
+                        if (purpleSendIndex == static_cast<int>(i) && purpleSendState != PurpleSendState::IDLE) continue;
                         // 静态卡牌：根据 cardColor 选择纹理
                         bool isPurple = (playerDeck.hand[i].cardColor == 1);
                         sf::Sprite* cardSpr = (isPurple && purpleCardSprite) ? purpleCardSprite : newCardSprite;
@@ -2672,46 +3162,106 @@ void GameEngine::renderGameplay() {
                         cardSpr->setPosition(cardPos);
                         sf::Vector2u texSize = cardTex.getSize();
 
-                        if (isReturningHandToDeck) {
-                            // 🌟 退牌反向动画：裁剪 100%→0% + 白光 0%→100%（镜像出生动画）
-                            float t = returnHandToDeckClock.getElapsedTime().asSeconds();
-                            if (t > 1.0f) t = 1.0f;
-                            float heightPct = 1.0f - t;
-                            float whitePct  = t;
-                            int clipH = static_cast<int>(texSize.y * heightPct);
-                            cardSpr->setTextureRect(sf::IntRect({0, 0}, {static_cast<int>(texSize.x), clipH}));
-                            // BlendAlpha 基底
-                            cardSpr->setColor(sf::Color(255, 255, 255, 255));
-                            window.draw(*cardSpr, sf::BlendAlpha);
-                            // BlendAdd 白光叠层（逐渐变亮直到纯白消失）
-                            uint8_t w = static_cast<uint8_t>(255 * whitePct);
-                            cardSpr->setColor(sf::Color(w, w, w, 255));
-                            window.draw(*cardSpr, sf::BlendAdd);
-                            // 文字同步渐隐
-                            if (heightPct > 0.02f) {
-                                uint8_t ta = static_cast<uint8_t>(255 * heightPct);
+                        bool isCurseRm = (curseRemoving && (int)i == curseRemovingIdx);
+                        if (isReturningHandToDeck || isCurseRm) {
+                            // 🌟 碎片销毁（退牌 / 诅咒移除）
+                            float rt = isCurseRm ? curseRemoveClock.getElapsedTime().asSeconds() / 2.0f
+                                                 : returnHandToDeckClock.getElapsedTime().asSeconds() / 2.0f;
+                            if (rt > 1.f) rt = 1.f;
+                            float t2 = rt * rt * (3.f - 2.f * rt);
+                            float clipH2 = texSize.y * (1.f - t2);
+                            int clipH = (int)clipH2;
+                            if (clipH > 0) {
+                                cardSpr->setOrigin({texSize.x / 2.f, texSize.y / 2.f});
+                                cardSpr->setTextureRect(sf::IntRect({0, 0}, {(int)texSize.x, clipH}));
+                                cardSpr->setPosition(cardPos);
+                                cardSpr->setColor(sf::Color(255, 255, 255, 255));
+                                window.draw(*cardSpr);
+                            }
+                            // 碎片渲染
+                            bool hasFrags2 = (isCurseRm && curseRemoveFragsInit) || (isReturningHandToDeck && returnDeckInit && i < (int)returnDeckFrags.size());
+                            if (hasFrags2) {
+                                auto& frags = isCurseRm ? curseRemoveFrags : returnDeckFrags[i];
+                                int fragTex = isCurseRm ? curseRemoveTex : returnDeckTex[i];
+                                sf::Sprite* spF = (fragTex == 1 && purpleCardSprite) ? purpleCardSprite : newCardSprite;
+                                sf::Texture& txF = (fragTex == 1) ? purpleCardTexture : newCardTexture;
+                                sf::Vector2u tsF = txF.getSize();
+                                if (tsF.x > 0 && tsF.y > 0) {
+                                    spF->setScale({0.36f, 0.36f});
+                                    for (auto& frag : frags) {
+                                        if (!frag.released) {
+                                            if ((float)frag.texRect.position.y > clipH2) {
+                                                frag.released = true;
+                                                float fcx = frag.texRect.size.x / 2.f;
+                                                float fcy = frag.texRect.size.y / 2.f;
+                                                frag.pos.x = cardPos.x + (frag.texRect.position.x + fcx - tsF.x / 2.f) * 0.36f;
+                                                frag.pos.y = cardPos.y + (frag.texRect.position.y + fcy - tsF.y / 2.f) * 0.36f;
+                                            }
+                                        }
+                                        if (frag.released) {
+                                            frag.vel.y += 800.f * 0.016f;
+                                            frag.pos += frag.vel * 0.016f;
+                                            frag.rotation += frag.rotSpeed * 0.016f;
+                                            frag.fadeTimer += 0.016f;
+                                            float fp = frag.fadeTimer / 0.85f;
+                                            if (fp > 1.f) fp = 1.f;
+                                            frag.alpha = 255.f * (1.f - fp * fp * (3.f - 2.f * fp));
+                                            float fcx = frag.texRect.size.x / 2.f;
+                                            float fcy = frag.texRect.size.y / 2.f;
+                                            spF->setOrigin({fcx, fcy});
+                                            spF->setTextureRect(frag.texRect);
+                                            spF->setPosition(frag.pos);
+                                            spF->setRotation(sf::degrees(frag.rotation));
+                                            spF->setColor(sf::Color(255, 255, 255, (uint8_t)frag.alpha));
+                                            window.draw(*spF);
+                                            uint8_t glow = (uint8_t)((1.f - fp) * 120.f);
+                                            if (glow > 0) { spF->setColor(sf::Color(glow, glow, glow, (uint8_t)frag.alpha)); window.draw(*spF, sf::BlendAdd); }
+                                        }
+                                    }
+                                    spF->setOrigin({tsF.x / 2.f, tsF.y / 2.f});
+                                    spF->setTextureRect(sf::IntRect({0, 0}, {(int)tsF.x, (int)tsF.y}));
+                                    spF->setRotation(sf::degrees(0.f));
+                                    spF->setColor(sf::Color(255, 255, 255, 255));
+                                }
+                            }
+                            // 文字逐行：扫描线扫到时 0.1s 淡出
+                            if ((returnDeckInit || (isCurseRm && curseRemoveFragsInit)) && i < (int)playerDeck.hand.size()) {
                                 const auto& sc = playerDeck.hand[i];
-                                const float rLineH = 26.f;
+                                const float fadeZone2 = texSize.y * 0.05f; // 0.1s
+                                auto textAlpha = [&](float screenY) -> uint8_t {
+                                    float texY = texSize.y/2.f + (screenY - cardPos.y) / 0.36f;
+                                    if (texY <= clipH2 - fadeZone2) return 255;
+                                    if (texY >= clipH2) return 0;
+                                    return (uint8_t)(255.f * (clipH2 - texY) / fadeZone2);
+                                };
                                 uiText.setFont(cardFont);
-                                uiText.setCharacterSize(28);
-                                uiText.setFillColor(sf::Color(255, 255, 255, ta));
-                                uiText.setString(sc.name);
-                                uiText.setPosition({cardPos.x - 52.f, cardPos.y - 164.f});
-                                window.draw(uiText);
-                                uiText.setCharacterSize(22);
-                                uiText.setFillColor(sf::Color(230, 230, 230, ta));
-                                std::wstring rDesc = sc.description;
-                                size_t rp = 0; int rli = 0;
-                                while (rp <= rDesc.size()) {
-                                    size_t rnl = rDesc.find(L'\n', rp);
-                                    if (rnl == std::wstring::npos) rnl = rDesc.size();
-                                    uiText.setString(sf::String(rDesc.substr(rp, rnl - rp)));
-                                    uiText.setPosition({cardPos.x - 88.f, cardPos.y - 90.f + rli * rLineH});
+                                uint8_t na = textAlpha(cardPos.y - 164.f);
+                                if (na > 0) {
+                                    uiText.setCharacterSize(28);
+                                    uiText.setFillColor(sf::Color(255,255,255,na));
+                                    uiText.setString(playerBlindActive ? scrambleText(sc.name) : sc.name);
+                                    uiText.setPosition({cardPos.x-52.f, cardPos.y-164.f});
                                     window.draw(uiText);
-                                    rp = rnl + 1; rli++;
+                                }
+                                std::wstring desc = sc.description;
+                                size_t dp = 0; int dl = 0; const float lH = 26.f;
+                                while (dp <= desc.size()) {
+                                    size_t nl = desc.find(L'\n', dp);
+                                    if (nl == std::wstring::npos) nl = desc.size();
+                                    float sy = cardPos.y - 90.f + dl * lH;
+                                    uint8_t da = textAlpha(sy);
+                                    if (da > 0) {
+                                        uiText.setCharacterSize(22);
+                                        uiText.setFillColor(sf::Color(230,230,230,da));
+                                        uiText.setString(sf::String(desc.substr(dp, nl-dp)));
+                                        uiText.setPosition({cardPos.x-88.f, sy});
+                                        window.draw(uiText);
+                                    }
+                                    dp = nl+1; dl++;
                                 }
                                 uiText.setFont(font);
                             }
+                            cardSpr->setTextureRect(sf::IntRect({0, 0}, {(int)texSize.x, (int)texSize.y}));
                         } else {
                             cardSpr->setTextureRect(sf::IntRect({0, 0}, {static_cast<int>(texSize.x), static_cast<int>(texSize.y)}));
                             cardSpr->setColor(sf::Color(255, 255, 255, 255));
@@ -2724,13 +3274,13 @@ void GameEngine::renderGameplay() {
                                 // 名称
                                 uiText.setCharacterSize(28);
                                 uiText.setFillColor(sf::Color(255, 255, 255, 255));
-                                uiText.setString(sc.name);
+                                uiText.setString(playerBlindActive ? scrambleText(sc.name) : sc.name);
                                 uiText.setPosition({cardPos.x - 52.f, cardPos.y - 164.f});
                                 window.draw(uiText);
                                 // 描述逐行
                                 uiText.setCharacterSize(22);
                                 uiText.setFillColor(sf::Color(230, 230, 230, 255));
-                                std::wstring desc = sc.description;
+                                std::wstring desc = playerBlindActive ? scrambleText(sc.description) : sc.description;
                                 size_t pos = 0; int li = 0;
                                 while (pos <= desc.size()) {
                                     size_t nl = desc.find(L'\n', pos);
@@ -2758,6 +3308,11 @@ void GameEngine::renderGameplay() {
             }
 
             // ── 顶卡：完整状态机 + 动画 + 文字 ──
+
+            // 紫卡传送期间跳过活跃卡渲染（由紫卡动画块接管）
+            if (purpleSendState != PurpleSendState::IDLE && activeIdx == purpleSendIndex) {
+                // skip active card rendering
+            } else {
 
             // 紫卡活跃时临时切换精灵纹理
             bool activeIsPurple = (activeIdx >= 0 && activeIdx < static_cast<int>(playerDeck.hand.size()) &&
@@ -2787,17 +3342,103 @@ void GameEngine::renderGameplay() {
 
                     switch (annihilateState) {
                         case CardAnnihilateState::PAUSE_BEFORE:
-                            // 【阶段 1】：点中后，在放开的原地完美死寂停顿 0.2 秒
+                            // 【阶段 1】：点中后，在原地停顿 0.2 秒 → 滑向读卡器
                             if (elapsed >= 0.2f) {
                                 annihilateState = CardAnnihilateState::MOVE_TO_200;
-                                annihilateClock.restart(); // 为下一阶段重新计时
-                                std::cout << "[Annihilate] 阶段 1 结束，落向 (640, 200)" << std::endl;
+                                annihilateClock.restart();
                             }
                             break;
 
+                        case CardAnnihilateState::SHATTER: {
+                            // 🌟 边上升边粉碎：cardShatterPos 从 (300,540) → (300,210)，0.7s smoothstep
+                            float rawT = cardShatterClock.getElapsedTime().asSeconds() / 0.8f;
+                            if (rawT > 1.f) rawT = 1.f;
+                            float t = rawT * rawT * (3.f - 2.f * rawT); // smoothstep
+                            // 动画位置：向上滑入读卡器
+                            cardShatterPos = {300.f, 540.f + (210.f - 540.f) * t};
+
+                            // 选用正确的卡牌精灵
+                            sf::Sprite* sp = (cardShatterTex == 1 && purpleCardSprite) ? purpleCardSprite : newCardSprite;
+                            sf::Texture& tx = (cardShatterTex == 1 && purpleCardSprite) ? purpleCardTexture : newCardTexture;
+                            sf::Vector2u ts = tx.getSize();
+                            if (ts.x > 0 && ts.y > 0 && !cardFragActive.empty()) {
+                                float scale = 0.36f;
+                                sp->setScale({scale, scale});
+                                float clipHeight = ts.y * (1.f - t);
+                                sf::Vector2f pos = cardShatterPos;
+
+                                // 1. 完整部分（裁剪纹理，无缝）
+                                int clipH = (int)clipHeight;
+                                if (clipH > 0) {
+                                    sp->setOrigin({ts.x / 2.f, ts.y / 2.f});
+                                    sp->setTextureRect(sf::IntRect({0, 0}, {(int)ts.x, clipH}));
+                                    sp->setPosition(pos);
+                                    sp->setColor(sf::Color(255, 255, 255, 255));
+                                    window.draw(*sp);
+                                }
+
+                                // 2. dt 计算
+                                float dt2 = rawT - cardShatterLastT;
+                                cardShatterLastT = rawT;
+                                if (dt2 < 0.f) dt2 = 0.f; if (dt2 > 0.1f) dt2 = 0.016f;
+
+                                // 3. 粉碎碎片
+                                for (auto& frag : cardFragActive) {
+                                    if (!frag.released) {
+                                        if ((float)frag.texRect.position.y > clipHeight) {
+                                            frag.released = true;
+                                            float fcx = frag.texRect.size.x / 2.f;
+                                            float fcy = frag.texRect.size.y / 2.f;
+                                            frag.pos.x = pos.x + (frag.texRect.position.x + fcx - ts.x / 2.f) * scale;
+                                            frag.pos.y = pos.y + (frag.texRect.position.y + fcy - ts.y / 2.f) * scale;
+                                        }
+                                    }
+                                    if (frag.released) {
+                                        frag.vel.y += 800.f * dt2;
+                                        frag.pos += frag.vel * dt2;
+                                        frag.rotation += frag.rotSpeed * dt2;
+                                        frag.fadeTimer += dt2;
+                                        float fp = frag.fadeTimer / 0.85f;
+                                        if (fp > 1.f) fp = 1.f;
+                                        frag.alpha = 255.f * (1.f - fp * fp * (3.f - 2.f * fp));
+                                        float fcx = frag.texRect.size.x / 2.f;
+                                        float fcy = frag.texRect.size.y / 2.f;
+                                        sp->setOrigin({fcx, fcy});
+                                        sp->setTextureRect(frag.texRect);
+                                        sp->setPosition(frag.pos);
+                                        sp->setRotation(sf::degrees(frag.rotation));
+                                        sp->setColor(sf::Color(255, 255, 255, (uint8_t)frag.alpha));
+                                        window.draw(*sp);
+                                        uint8_t glow3 = (uint8_t)((1.f - fp) * 120.f);
+                                        if (glow3 > 0) { sp->setColor(sf::Color(glow3, glow3, glow3, (uint8_t)frag.alpha)); window.draw(*sp, sf::BlendAdd); }
+                                    }
+                                }
+                                sp->setOrigin({ts.x / 2.f, ts.y / 2.f});
+                                sp->setTextureRect(sf::IntRect({0, 0}, {(int)ts.x, (int)ts.y}));
+                                sp->setRotation(sf::degrees(0.f));
+                                sp->setColor(sf::Color(255, 255, 255, 255));
+                            }
+                            cardAlreadyRendered = true;
+
+                            if (rawT >= 1.f) {
+                                if (!playerDeck.hand.empty() && attachedCardIndex >= 0) {
+                                    showcasedCard = playerDeck.hand[attachedCardIndex];
+                                    playerDeck.discardCard(showcasedCard);
+                                    playerDeck.hand.erase(playerDeck.hand.begin() + attachedCardIndex);
+                                    handSlotAssign.erase(handSlotAssign.begin() + attachedCardIndex);
+                                    attachedCardIndex = -1;
+                                    showcaseState = CardShowcaseState::PAUSE;
+                                    showcaseClock.restart();
+                                    newCardSprite->setPosition({300.f, 540.f});
+                                    annihilateState = CardAnnihilateState::NONE;
+                                }
+                            }
+                            break;
+                        }
+
                         case CardAnnihilateState::MOVE_TO_200: {
                             // 🎯 设定第二阶段的目标过渡坐标
-                            sf::Vector2f targetAnnihilatePos(300.f, 400.f);
+                            sf::Vector2f targetAnnihilatePos(300.f, 540.f);
 
                             // 🚀 核心缓动算法：先快后慢的指数级缓出曲线 (与飞回卡槽的因子 0.07f 完美同步)
                             cardPos.x = cardPos.x + (targetAnnihilatePos.x - cardPos.x) * 0.07f;
@@ -2821,12 +3462,23 @@ void GameEngine::renderGameplay() {
                         }
 
                         case CardAnnihilateState::PAUSE_AFTER:
-                            // 【阶段 3】：在 (640, 200) 稳稳卡住停顿 0.5 秒
-                            cardPos = {300.f, 400.f};
-                            if (elapsed >= 0.5f) {
-                                annihilateState = CardAnnihilateState::MOVE_TO_ZERO;
-                                annihilateClock.restart();
-                                std::cout << "[Annihilate] 阶段 3 结束，启动虚无上升序列" << std::endl;
+                            // 【阶段 3】：在 (300, 540) 停顿 0.2 秒 → 边上升边粉碎
+                            cardPos = {300.f, 540.f};
+                            if (elapsed >= 0.2f) {
+                                const Card& c = playerDeck.hand[attachedCardIndex];
+                                cardFragActive = (c.cardColor == 1) ? cardFragCachePurple : cardFragCache;
+                                cardShatterTex = c.cardColor;
+                                cardShatterPos = cardPos;
+                                for (auto& frag : cardFragActive) {
+                                    frag.released = false; frag.alpha = 255.f; frag.fadeTimer = 0.f;
+                                    frag.rotation = 0.f;
+                                    frag.vel = {(rand()%200-100)*1.f, -(rand()%200+100)*1.f};
+                                    frag.rotSpeed = (rand()%720-360)*1.f;
+                                    frag.pos = cardPos;
+                                }
+                                cardShatterClock.restart();
+                                cardShatterLastT = 0.f;
+                                annihilateState = CardAnnihilateState::SHATTER;
                             }
                             break;
 
@@ -2893,41 +3545,226 @@ void GameEngine::renderGameplay() {
                 newCardSprite->setScale({0.36f, 0.36f});
                 newCardSprite->setPosition(cardPos);
 
-                // 获取纹理的原始完整物理尺寸
-                sf::Vector2u texSize = newCardTexture.getSize();
+                // 获取活跃卡的实际纹理尺寸
+                bool activeIsPurple = (activeIdx >= 0 && activeIdx < (int)playerDeck.hand.size() && playerDeck.hand[activeIdx].cardColor == 1);
+                sf::Vector2u texSize = (activeIsPurple && purpleCardSprite) ? purpleCardTexture.getSize() : newCardTexture.getSize();
 
-                if (isReturningHandToDeck) {
-                    // 🌟 退牌反向动画（槽顶卡版）：裁剪 100%→0% + 白光 0%→100%
-                    float t = returnHandToDeckClock.getElapsedTime().asSeconds();
-                    if (t > 1.0f) t = 1.0f;
-                    float heightPct = 1.0f - t;
-                    float whitePct  = t;
-                    int clipH = static_cast<int>(texSize.y * heightPct);
-                    newCardSprite->setTextureRect(sf::IntRect({0, 0}, {static_cast<int>(texSize.x), clipH}));
-                    newCardSprite->setColor(sf::Color(255, 255, 255, 255));
-                    window.draw(*newCardSprite, sf::BlendAlpha);
-                    uint8_t w = static_cast<uint8_t>(255 * whitePct);
-                    newCardSprite->setColor(sf::Color(w, w, w, 255));
-                    window.draw(*newCardSprite, sf::BlendAdd);
-                    // 文字渐隐
-                    if (heightPct > 0.02f && activeIdx >= 0) {
-                        uint8_t ta = static_cast<uint8_t>(255 * heightPct);
-                        const auto& currentCard = playerDeck.hand[activeIdx];
+                bool isCurseActive2 = (curseRemoving && activeIdx == curseRemovingIdx);
+                if (isReturningHandToDeck || isCurseActive2) {
+                    // 🌟 碎片销毁（退牌 / 诅咒移除，槽顶卡版）
+                    float rt2 = isCurseActive2 ? curseRemoveClock.getElapsedTime().asSeconds() / 2.0f
+                                               : returnHandToDeckClock.getElapsedTime().asSeconds() / 2.0f;
+                    if (rt2 > 1.f) rt2 = 1.f;
+                    float t2 = rt2 * rt2 * (3.f - 2.f * rt2);
+                    float clipH2 = texSize.y * (1.f - t2);
+                    int clipH = (int)clipH2;
+                    sf::Sprite* spTop = (activeIsPurple && purpleCardSprite) ? purpleCardSprite : newCardSprite;
+                    if (clipH > 0) {
+                        spTop->setOrigin({texSize.x / 2.f, texSize.y / 2.f});
+                        spTop->setTextureRect(sf::IntRect({0, 0}, {(int)texSize.x, clipH}));
+                        spTop->setPosition(cardPos);
+                        spTop->setColor(sf::Color(255, 255, 255, 255));
+                        window.draw(*spTop);
+                    }
+                    bool isCurseActive = (curseRemoving && activeIdx == curseRemovingIdx);
+                    bool hasFrags3 = (isCurseActive && curseRemoveFragsInit) || (isReturningHandToDeck && returnDeckInit && activeIdx >= 0 && activeIdx < (int)returnDeckFrags.size());
+                    if (hasFrags3) {
+                        auto& frags = isCurseActive ? curseRemoveFrags : returnDeckFrags[activeIdx];
+                        int fragTex = isCurseActive ? curseRemoveTex : returnDeckTex[activeIdx];
+                        sf::Sprite* spF2 = (fragTex == 1 && purpleCardSprite) ? purpleCardSprite : newCardSprite;
+                        sf::Texture& txF2 = (fragTex == 1) ? purpleCardTexture : newCardTexture;
+                        sf::Vector2u tsF = txF2.getSize();
+                        if (tsF.x > 0 && tsF.y > 0) {
+                            spF2->setScale({0.36f, 0.36f});
+                            for (auto& frag : frags) {
+                                if (!frag.released) {
+                                    if ((float)frag.texRect.position.y > clipH2) {
+                                        frag.released = true;
+                                        float fcx = frag.texRect.size.x / 2.f;
+                                        float fcy = frag.texRect.size.y / 2.f;
+                                        frag.pos.x = cardPos.x + (frag.texRect.position.x + fcx - tsF.x / 2.f) * 0.36f;
+                                        frag.pos.y = cardPos.y + (frag.texRect.position.y + fcy - tsF.y / 2.f) * 0.36f;
+                                    }
+                                }
+                                if (frag.released) {
+                                    frag.vel.y += 800.f * 0.016f;
+                                    frag.pos += frag.vel * 0.016f;
+                                    frag.rotation += frag.rotSpeed * 0.016f;
+                                    frag.fadeTimer += 0.016f;
+                                    float fp = frag.fadeTimer / 0.85f;
+                                    if (fp > 1.f) fp = 1.f;
+                                    frag.alpha = 255.f * (1.f - fp * fp * (3.f - 2.f * fp));
+                                    float fcx = frag.texRect.size.x / 2.f;
+                                    float fcy = frag.texRect.size.y / 2.f;
+                                    spF2->setOrigin({fcx, fcy});
+                                    spF2->setTextureRect(frag.texRect);
+                                    spF2->setPosition(frag.pos);
+                                    spF2->setRotation(sf::degrees(frag.rotation));
+                                    spF2->setColor(sf::Color(255, 255, 255, (uint8_t)frag.alpha));
+                                    window.draw(*spF2);
+                                    uint8_t glow2 = (uint8_t)((1.f - fp) * 120.f);
+                                    if (glow2 > 0) { spF2->setColor(sf::Color(glow2, glow2, glow2, (uint8_t)frag.alpha)); window.draw(*spF2, sf::BlendAdd); }
+                                }
+                            }
+                            spF2->setOrigin({tsF.x / 2.f, tsF.y / 2.f});
+                            spF2->setTextureRect(sf::IntRect({0, 0}, {(int)tsF.x, (int)tsF.y}));
+                            spF2->setRotation(sf::degrees(0.f));
+                            spF2->setColor(sf::Color(255, 255, 255, 255));
+                        }
+                    }
+                    // 文字逐行：扫描线扫到时 0.1s 淡出（槽顶卡）
+                    if ((returnDeckInit || (isCurseActive2 && curseRemoveFragsInit)) && activeIdx >= 0 && activeIdx < (int)playerDeck.hand.size()) {
+                        const auto& sc = playerDeck.hand[activeIdx];
+                        const float fadeZone3 = texSize.y * 0.05f;
+                        auto textAlpha2 = [&](float screenY) -> uint8_t {
+                            float texY2 = texSize.y/2.f + (screenY - cardPos.y) / 0.36f;
+                            if (texY2 <= clipH2 - fadeZone3) return 255;
+                            if (texY2 >= clipH2) return 0;
+                            return (uint8_t)(255.f * (clipH2 - texY2) / fadeZone3);
+                        };
                         uiText.setFont(cardFont);
-                        uiText.setCharacterSize(28);
-                        uiText.setFillColor(sf::Color(255, 255, 255, ta));
-                        uiText.setString(currentCard.name);
-                        uiText.setPosition({cardPos.x - 52.f, cardPos.y - 164.f});
-                        window.draw(uiText);
-                        if (heightPct > 0.40f) {
-                            uiText.setCharacterSize(22);
-                            uiText.setFillColor(sf::Color(230, 230, 230, ta));
-                            uiText.setString(currentCard.description);
-                            uiText.setPosition({cardPos.x - 88.f, cardPos.y - 90.f});
+                        uint8_t na2 = textAlpha2(cardPos.y - 164.f);
+                        if (na2 > 0) {
+                            uiText.setCharacterSize(28);
+                            uiText.setFillColor(sf::Color(255,255,255,na2));
+                            uiText.setString(playerBlindActive ? scrambleText(sc.name) : sc.name);
+                            uiText.setPosition({cardPos.x-52.f, cardPos.y-164.f});
                             window.draw(uiText);
+                        }
+                        std::wstring desc = sc.description;
+                        size_t dp = 0; int dl = 0; const float lH = 26.f;
+                        while (dp <= desc.size()) {
+                            size_t nl = desc.find(L'\n', dp);
+                            if (nl == std::wstring::npos) nl = desc.size();
+                            float sy = cardPos.y - 90.f + dl * lH;
+                            uint8_t da2 = textAlpha2(sy);
+                            if (da2 > 0) {
+                                uiText.setCharacterSize(22);
+                                uiText.setFillColor(sf::Color(230,230,230,da2));
+                                uiText.setString(sf::String(desc.substr(dp, nl-dp)));
+                                uiText.setPosition({cardPos.x-88.f, sy});
+                                window.draw(uiText);
+                            }
+                            dp = nl+1; dl++;
                         }
                         uiText.setFont(font);
                     }
+                    spTop->setTextureRect(sf::IntRect({0, 0}, {(int)texSize.x, (int)texSize.y}));
+                    spTop->setOrigin({texSize.x / 2.f, texSize.y / 2.f});
+                    spTop->setRotation(sf::degrees(0.f));
+                    spTop->setColor(sf::Color(255, 255, 255, 255));
+                    // 如果 spTop 是 purpleCardSprite 还需要恢复 newCardSprite
+                    if (activeIsPurple && purpleCardSprite) {
+                        sf::Vector2u nt = newCardTexture.getSize();
+                        newCardSprite->setTextureRect(sf::IntRect({0, 0}, {(int)nt.x, (int)nt.y}));
+                        newCardSprite->setOrigin({nt.x / 2.f, nt.y / 2.f});
+                        newCardSprite->setColor(sf::Color(255, 255, 255, 255));
+                    }
+                } else if (cardBirthActive && cardBirthInit && activeIdx == (int)playerDeck.hand.size() - 1) {
+                // 🌟 碎片聚合出生：自上往下扫描，碎片从下方飞入聚合
+                float rawT = cardBirthClock.getElapsedTime().asSeconds() / 1.5f;
+                if (rawT > 1.f) rawT = 1.f;
+                float t2 = (rawT < 0.667f) ? (rawT / 0.667f) : 1.f; // 前 1.0s 聚合，后 0.5s 衰减
+                sf::Sprite* spB = (cardBirthTex == 1 && purpleCardSprite) ? purpleCardSprite : newCardSprite;
+                sf::Texture& txB = (cardBirthTex == 1) ? purpleCardTexture : newCardTexture;
+                sf::Vector2u tsB = txB.getSize();
+                if (tsB.x > 0 && tsB.y > 0 && !cardBirthFrags.empty()) {
+                    float wipeY = tsB.y * t2;
+                    spB->setScale({0.36f, 0.36f});
+                    // 已聚合部分（擦除线以上）：无缝裁剪纹理
+                    int visH = (int)wipeY;
+                    if (visH > 0) {
+                        spB->setOrigin({tsB.x / 2.f, tsB.y / 2.f});
+                        spB->setTextureRect(sf::IntRect({0, 0}, {(int)tsB.x, visH}));
+                        spB->setPosition(cardPos);
+                        spB->setColor(sf::Color(255, 255, 255, 255));
+                        window.draw(*spB);
+                    }
+                    // 聚合碎片（擦除线以下正在飞入）
+                    for (auto& frag : cardBirthFrags) {
+                        float fcx = frag.texRect.size.x / 2.f;
+                        float fcy = frag.texRect.size.y / 2.f;
+                        float tx = cardPos.x + (frag.texRect.position.x + fcx - tsB.x / 2.f) * 0.36f;
+                        float ty = cardPos.y + (frag.texRect.position.y + fcy - tsB.y / 2.f) * 0.36f;
+                        float fragTop = (float)frag.texRect.position.y;
+                        if (!frag.released && fragTop < wipeY + tsB.y * 0.08f && fragTop >= wipeY - tsB.y * 0.02f) {
+                            frag.released = true;
+                            frag.targetPos = {tx, ty};
+                            frag.fadeTimer = 0.f;
+                            // 散落起始位置紧贴目标下方 30~80px
+                            frag.pos.x = tx + (rand() % 60 - 30) * 1.f;
+                            frag.pos.y = ty + (rand() % 50 + 30) * 1.f;
+                        }
+                        if (frag.released) {
+                            frag.fadeTimer += 0.016f;
+                            float prog = frag.fadeTimer / 0.35f;
+                            if (prog > 1.f) prog = 1.f;
+                            float eased = prog * prog * (3.f - 2.f * prog);
+                            frag.pos.x += (frag.targetPos.x - frag.pos.x) * 0.12f;
+                            frag.pos.y += (frag.targetPos.y - frag.pos.y) * 0.12f;
+                            frag.alpha = 255.f * eased;
+                            spB->setOrigin({fcx, fcy});
+                            spB->setTextureRect(frag.texRect);
+                            spB->setPosition(frag.pos);
+                            spB->setRotation(sf::degrees(frag.rotation * (1.f - eased)));
+                            spB->setColor(sf::Color(255, 255, 255, (uint8_t)frag.alpha));
+                            window.draw(*spB);
+                            // 亮度：飞行中渐增，到达后 0.5s 缓慢暗下来
+                            float glowB = 0.f;
+                            if (eased < 1.f) {
+                                glowB = eased * 80.f;
+                            } else {
+                                float tAfter = frag.fadeTimer - 0.35f;
+                                float f2 = tAfter / 0.25f; if (f2 > 1.f) f2 = 1.f;
+                                glowB = 80.f * (1.f - f2);
+                            }
+                            if (glowB > 0.f) { spB->setColor(sf::Color((uint8_t)glowB, (uint8_t)glowB, (uint8_t)glowB, (uint8_t)frag.alpha)); window.draw(*spB, sf::BlendAdd); }
+                        }
+                    }
+                    spB->setOrigin({tsB.x / 2.f, tsB.y / 2.f});
+                    spB->setTextureRect(sf::IntRect({0, 0}, {(int)tsB.x, (int)tsB.y}));
+                    spB->setRotation(sf::degrees(0.f));
+                    spB->setColor(sf::Color(255, 255, 255, 255));
+                    // 文字逐行：扫描线扫到时 0.1s 淡入
+                    if (!playerDeck.hand.empty()) {
+                        const auto& sc = playerDeck.hand[activeIdx];
+                        const float fadeZone = tsB.y * 0.067f; // 0.1s
+                        auto textAlphaB = [&](float screenY) -> uint8_t {
+                            float texY2 = tsB.y/2.f + (screenY - cardPos.y) / 0.36f;
+                            if (wipeY >= texY2 + fadeZone) return 255;
+                            if (wipeY <= texY2) return 0;
+                            return (uint8_t)(255.f * (wipeY - texY2) / fadeZone);
+                        };
+                        uiText.setFont(cardFont);
+                        uint8_t na = textAlphaB(cardPos.y - 164.f);
+                        if (na > 0) {
+                            uiText.setCharacterSize(28);
+                            uiText.setFillColor(sf::Color(255,255,255,na));
+                            uiText.setString(playerBlindActive ? scrambleText(sc.name) : sc.name);
+                            uiText.setPosition({cardPos.x-52.f, cardPos.y-164.f});
+                            window.draw(uiText);
+                        }
+                        std::wstring desc = sc.description;
+                        size_t dp = 0; int dl = 0; const float lH = 26.f;
+                        while (dp <= desc.size()) {
+                            size_t nl = desc.find(L'\n', dp);
+                            if (nl == std::wstring::npos) nl = desc.size();
+                            float sy = cardPos.y - 90.f + dl * lH;
+                            uint8_t da = textAlphaB(sy);
+                            if (da > 0) {
+                                uiText.setCharacterSize(22);
+                                uiText.setFillColor(sf::Color(230,230,230,da));
+                                uiText.setString(sf::String(desc.substr(dp, nl-dp)));
+                                uiText.setPosition({cardPos.x-88.f, sy});
+                                window.draw(uiText);
+                            }
+                            dp = nl+1; dl++;
+                        }
+                        uiText.setFont(font);
+                    }
+                }
+                cardAlreadyRendered = true;
+                if (rawT >= 1.f) { cardBirthActive = false; isAnimatingCard = false; }
                 } else {
                 // 🌟 动效一：连续插值替代固定50段量化，消除帧率拍频闪烁
                 float currentHeightPercent = animTime / 1.0f;  // 0.0 → 1.0 连续增长
@@ -2995,11 +3832,11 @@ void GameEngine::renderGameplay() {
                         window.draw(uiText);
                     };
                     // 卡牌名
-                    drawLine(sf::String(currentCard.name), cardPos.x - 52.f, cardPos.y - 164.f,
+                    drawLine(sf::String(playerBlindActive ? scrambleText(currentCard.name) : currentCard.name), cardPos.x - 52.f, cardPos.y - 164.f,
                              28, sf::Color(255, 255, 255), lineTh(164.f));
                     // 描述逐行（行距与静态卡牌统一：26px）
                     const float lineH = 26.f;
-                    std::wstring desc = currentCard.description;
+                    std::wstring desc = playerBlindActive ? scrambleText(currentCard.description) : currentCard.description;
                     size_t pos = 0; int li = 0;
                     while (pos <= desc.size()) {
                         size_t nl = desc.find(L'\n', pos);
@@ -3019,17 +3856,61 @@ void GameEngine::renderGameplay() {
         if (activeIsPurple) {
             newCardSprite->setTexture(savedTex, true);
         }
+        } // end if purpleSendState skip
     }
     }
 
     // ============================================================================
+    // ── 卡牌碎片衰减（动画结束后继续淡出）──
+    if (!cardDecayFrags.empty()) {
+        sf::Sprite* spCd = (cardDecayTex == 1 && purpleCardSprite) ? purpleCardSprite : newCardSprite;
+        sf::Texture& txCd = (cardDecayTex == 1) ? purpleCardTexture : newCardTexture;
+        sf::Vector2u tsCd = txCd.getSize();
+        if (tsCd.x > 0 && tsCd.y > 0) {
+            spCd->setScale({0.36f, 0.36f});
+            for (size_t di = 0; di < cardDecayFrags.size(); ) {
+                auto& frag = cardDecayFrags[di];
+                float fp = 1.f;
+                if (frag.alpha > 0.f) {
+                    frag.vel.y += 800.f * 0.016f;
+                    frag.pos += frag.vel * 0.016f;
+                    frag.fadeTimer += 0.016f;
+                    fp = frag.fadeTimer / 0.85f;
+                    if (fp > 1.f) fp = 1.f;
+                    frag.alpha = 255.f * (1.f - fp * fp * (3.f - 2.f * fp));
+                }
+                if (frag.alpha <= 0.f) {
+                    cardDecayFrags.erase(cardDecayFrags.begin() + di);
+                    continue;
+                }
+                float fcx = frag.texRect.size.x / 2.f;
+                float fcy = frag.texRect.size.y / 2.f;
+                spCd->setOrigin({fcx, fcy});
+                spCd->setTextureRect(frag.texRect);
+                spCd->setPosition(frag.pos);
+                spCd->setColor(sf::Color(255, 255, 255, (uint8_t)frag.alpha));
+                window.draw(*spCd);
+                uint8_t glow4 = (uint8_t)((1.f - fp) * 120.f);
+                if (glow4 > 0) { spCd->setColor(sf::Color(glow4, glow4, glow4, (uint8_t)frag.alpha)); window.draw(*spCd, sf::BlendAdd); }
+                ++di;
+            }
+            spCd->setOrigin({tsCd.x / 2.f, tsCd.y / 2.f});
+            spCd->setTextureRect(sf::IntRect({0, 0}, {(int)tsCd.x, (int)tsCd.y}));
+            spCd->setColor(sf::Color(255, 255, 255, 255));
+        }
+    }
+
     // 🌟 卡牌效果展示动画（湮灭完成后，画面中央展示）
     //    流程: PAUSE(0.5s) → APPEAR(1.2s) → DISPLAY(2s) → FADE_OUT(1s) → 触发效果
     // ============================================================================
     if (showcaseState != CardShowcaseState::NONE && newCardSprite != nullptr) {
         float t = showcaseClock.getElapsedTime().asSeconds();
         sf::Vector2f centerPos(1280.f, 720.f);
-        sf::Vector2u texSize = newCardTexture.getSize();
+        // 🌟 紫卡传送展示使用独立紫卡精灵，不污染橙卡纹理
+        bool showcaseIsPurple = aiCardIsPurpleTransfer;
+        sf::Sprite*  showcaseSpr = (showcaseIsPurple && purpleCardSprite) ? purpleCardSprite : newCardSprite;
+        sf::Texture& showcaseTex = (showcaseIsPurple && purpleCardSprite) ? purpleCardTexture : newCardTexture;
+        sf::Vector2u texSize = showcaseTex.getSize();
         const float TARGET_SCALE = 0.76f;
         const float START_SCALE  = 0.10f;
         const float NORMAL_SCALE = 0.36f;              // 卡槽正常缩放
@@ -3045,38 +3926,77 @@ void GameEngine::renderGameplay() {
 
             case CardShowcaseState::PAUSE:
                 // 湮灭后 0.3s 空白停顿
+                showcaseFragsInit = false;
                 if (t >= 0.3f) {
                     showcaseState = CardShowcaseState::APPEAR;
                     showcaseClock.restart();
-                    std::cout << "[Showcase] 停顿结束，开始中央展示出现动画。" << std::endl;
                 }
                 break;
 
             case CardShowcaseState::APPEAR: {
-                // ── 缩放：指数缓出 0.05 → 0.38（先快后慢）──
-                float scaleFactor = 1.0f - std::exp(-t * 8.0f);
-                float currentScale = START_SCALE + (TARGET_SCALE - START_SCALE) * scaleFactor;
-
-                // ── 50 段阶梯裁剪：0 → 50（镜像出生动画）──
-                float heightPercent = t / 1.0f;  // 连续插值，0.0 → 1.0，无帧率依赖
-                if (heightPercent > 1.f) heightPercent = 1.f;
-                int rectHeight = static_cast<int>(texSize.y * heightPercent);
-
-                // ── 白光辉光：极亮 → 正常（1.2s，镜像出生动画）──
-                float whiteProgress = 1.0f - (t / 1.2f);
-                if (whiteProgress < 0.f) whiteProgress = 0.f;
-
-                newCardSprite->setScale({currentScale, currentScale});
-                newCardSprite->setPosition(centerPos);
-                newCardSprite->setTextureRect(sf::IntRect({0, 0}, {static_cast<int>(texSize.x), rectHeight}));
-
-                // 双通道渲染（与出生动画完全一致）
-                newCardSprite->setColor(sf::Color(255, 255, 255, 255));
-                window.draw(*newCardSprite, sf::BlendAlpha);
-
-                uint8_t whiteEmit = static_cast<uint8_t>(255 * whiteProgress);
-                newCardSprite->setColor(sf::Color(whiteEmit, whiteEmit, whiteEmit, 255));
-                window.draw(*newCardSprite, sf::BlendAdd);
+                // 🌟 碎片聚合展示（自上往下扫描，碎片飞入）
+                if (!showcaseFragsInit) {
+                    showcaseFrags = (showcasedCard.cardColor == 1) ? cardFragCachePurple : cardFragCache;
+                    showcaseFragsTex = showcasedCard.cardColor;
+                    for (auto& frag : showcaseFrags) {
+                        frag.released = false; frag.alpha = 0.f; frag.fadeTimer = 0.f;
+                        frag.rotation = (rand() % 60 - 30) * 1.f;
+                        frag.pos.x = centerPos.x + (rand() % 300 - 150) * 1.f;
+                        frag.pos.y = centerPos.y + (rand() % 100 + 80) * 1.f;
+                    }
+                    showcaseFragsInit = true;
+                }
+                float rawT = t / 1.2f;
+                if (rawT > 1.f) rawT = 1.f;
+                float wipeY = texSize.y * rawT;
+                int visH = (int)wipeY;
+                if (visH > 0) {
+                    showcaseSpr->setScale({TARGET_SCALE, TARGET_SCALE});
+                    showcaseSpr->setOrigin({texSize.x / 2.f, texSize.y / 2.f});
+                    showcaseSpr->setTextureRect(sf::IntRect({0, 0}, {(int)texSize.x, visH}));
+                    showcaseSpr->setPosition(centerPos);
+                    showcaseSpr->setColor(sf::Color(255, 255, 255, 255));
+                    window.draw(*showcaseSpr);
+                }
+                for (auto& frag : showcaseFrags) {
+                    float fcx = frag.texRect.size.x / 2.f;
+                    float fcy = frag.texRect.size.y / 2.f;
+                    float tx = centerPos.x + (frag.texRect.position.x + fcx - texSize.x / 2.f) * TARGET_SCALE;
+                    float ty = centerPos.y + (frag.texRect.position.y + fcy - texSize.y / 2.f) * TARGET_SCALE;
+                    float fragTop = (float)frag.texRect.position.y;
+                    if (!frag.released && fragTop < wipeY + texSize.y * 0.06f && fragTop >= wipeY - texSize.y * 0.02f) {
+                        frag.released = true;
+                        frag.targetPos = {tx, ty};
+                        frag.fadeTimer = 0.f;
+                        frag.pos.x = tx + (rand() % 60 - 30) * 1.f;
+                        frag.pos.y = ty + (rand() % 50 + 30) * 1.f;
+                    }
+                    if (frag.released) {
+                        frag.fadeTimer += 0.016f;
+                        float prog = frag.fadeTimer / 0.3f;
+                        if (prog > 1.f) prog = 1.f;
+                        float eased = prog * prog * (3.f - 2.f * prog);
+                        frag.pos.x += (frag.targetPos.x - frag.pos.x) * 0.12f;
+                        frag.pos.y += (frag.targetPos.y - frag.pos.y) * 0.12f;
+                        frag.alpha = 255.f * eased;
+                        showcaseSpr->setScale({TARGET_SCALE, TARGET_SCALE});
+                        showcaseSpr->setOrigin({fcx, fcy});
+                        showcaseSpr->setTextureRect(frag.texRect);
+                        showcaseSpr->setPosition(frag.pos);
+                        showcaseSpr->setRotation(sf::degrees(frag.rotation * (1.f - eased)));
+                        showcaseSpr->setColor(sf::Color(255, 255, 255, (uint8_t)frag.alpha));
+                        window.draw(*showcaseSpr);
+                        // 亮度效果
+                        float glowB = 0.f;
+                        if (eased < 1.f) { glowB = eased * 60.f; }
+                        else { float ta = frag.fadeTimer - 0.3f; float f2 = ta / 0.2f; if (f2 > 1.f) f2 = 1.f; glowB = 60.f * (1.f - f2); }
+                        if (glowB > 0.f) { showcaseSpr->setColor(sf::Color((uint8_t)glowB, (uint8_t)glowB, (uint8_t)glowB, (uint8_t)frag.alpha)); window.draw(*showcaseSpr, sf::BlendAdd); }
+                    }
+                }
+                showcaseSpr->setOrigin({texSize.x / 2.f, texSize.y / 2.f});
+                showcaseSpr->setTextureRect(sf::IntRect({0, 0}, {(int)texSize.x, (int)texSize.y}));
+                showcaseSpr->setRotation(sf::degrees(0.f));
+                showcaseSpr->setColor(sf::Color(255, 255, 255, 255));
 
                 // 文字跟随裁剪边缘出现（0.1s 淡入+亮→原色）
                 float sHalfH = texSize.y * TARGET_SCALE * 0.5f;
@@ -3123,11 +4043,11 @@ void GameEngine::renderGameplay() {
 
             case CardShowcaseState::DISPLAY: {
                 // ── 完整展示 2 秒 ──
-                newCardSprite->setScale({TARGET_SCALE, TARGET_SCALE});
-                newCardSprite->setPosition(centerPos);
-                newCardSprite->setTextureRect(sf::IntRect({0, 0}, {static_cast<int>(texSize.x), static_cast<int>(texSize.y)}));
-                newCardSprite->setColor(sf::Color(255, 255, 255, 255));
-                window.draw(*newCardSprite, sf::BlendAlpha);
+                showcaseSpr->setScale({TARGET_SCALE, TARGET_SCALE});
+                showcaseSpr->setPosition(centerPos);
+                showcaseSpr->setTextureRect(sf::IntRect({0, 0}, {static_cast<int>(texSize.x), static_cast<int>(texSize.y)}));
+                showcaseSpr->setColor(sf::Color(255, 255, 255, 255));
+                window.draw(*showcaseSpr, sf::BlendAlpha);
 
                 uiText.setFont(cardFont);
                 uiText.setCharacterSize(NAME_FONT);
@@ -3167,18 +4087,18 @@ void GameEngine::renderGameplay() {
                 float alphaProgress = 1.0f - whiteProgress;
                 uint8_t currentAlpha = static_cast<uint8_t>(255 * alphaProgress);
 
-                newCardSprite->setScale({TARGET_SCALE, TARGET_SCALE});
-                newCardSprite->setPosition(centerPos);
-                newCardSprite->setTextureRect(sf::IntRect({0, 0}, {static_cast<int>(texSize.x), static_cast<int>(texSize.y)}));
+                showcaseSpr->setScale({TARGET_SCALE, TARGET_SCALE});
+                showcaseSpr->setPosition(centerPos);
+                showcaseSpr->setTextureRect(sf::IntRect({0, 0}, {static_cast<int>(texSize.x), static_cast<int>(texSize.y)}));
 
                 // BlendAlpha 基底（含透明度衰减）
-                newCardSprite->setColor(sf::Color(255, 255, 255, currentAlpha));
-                window.draw(*newCardSprite, sf::BlendAlpha);
+                showcaseSpr->setColor(sf::Color(255, 255, 255, currentAlpha));
+                window.draw(*showcaseSpr, sf::BlendAlpha);
 
                 // BlendAdd 白光叠层（含透明度衰减，同步熄灭）
                 uint8_t whiteEmit = static_cast<uint8_t>(255 * whiteProgress * alphaProgress);
-                newCardSprite->setColor(sf::Color(whiteEmit, whiteEmit, whiteEmit, 255));
-                window.draw(*newCardSprite, sf::BlendAdd);
+                showcaseSpr->setColor(sf::Color(whiteEmit, whiteEmit, whiteEmit, 255));
+                window.draw(*showcaseSpr, sf::BlendAdd);
 
                 // 文字同步淡出（逐行）
                 float fLineH = DESC_FONT * 1.15f;
@@ -3204,18 +4124,30 @@ void GameEngine::renderGameplay() {
                 uiText.setFont(font);
 
                 if (t >= 0.4f) {
-                    std::cout << "[Showcase] 消退完成，正式触发卡牌效果 —— "
-                              << showcasedCard.name.c_str() << std::endl;
-                    bool immediate = applyCardEffect(showcasedCard);
-                    if (immediate) {
-                        // 即时效果：恢复计时、消耗AP、结算、解锁
-                        if (isTurnPaused) {
-                            turnTimePaused += pauseClock.getElapsedTime().asSeconds();
-                            isTurnPaused = false;
+                    // 🌟 紫卡传送：不走 applyCardEffect，转为加入玩家手牌
+                    if (aiCardIsPurpleTransfer) {
+                        Card purpleCard = showcasedCard;
+                        purpleCard.transferred = true;
+                        playerDeck.hand.push_back(purpleCard);
+                        handSlotAssign.push_back(1);
+                        newCardJustDrawn = true;
+                        cardAnimClock.restart();
+                        isAnimatingCard = true;
+                        std::cout << "[Showcase] 紫卡传送——消退完成，卡牌转移至玩家手牌" << std::endl;
+                    } else {
+                        std::cout << "[Showcase] 消退完成，正式触发卡牌效果 —— "
+                                  << showcasedCard.name.c_str() << std::endl;
+                        bool immediate = applyCardEffect(showcasedCard);
+                        if (immediate) {
+                            // 即时效果：恢复计时、消耗AP、结算、解锁
+                            if (isTurnPaused) {
+                                turnTimePaused += pauseClock.getElapsedTime().asSeconds();
+                                isTurnPaused = false;
+                            }
+                            consumeActionPoint(false);
+                            settleActionPoints();
+                            isBusyAnimating = false;
                         }
-                        consumeActionPoint(false);
-                        settleActionPoints();
-                        isBusyAnimating = false;
                     }
                     // 延迟效果（破釜沉舟/笼络）：保持 isTurnPaused 和 isBusyAnimating，
                     // 由各自的 deferred completion handler 负责解锁和结算
@@ -3262,6 +4194,226 @@ void GameEngine::renderGameplay() {
     timerText.setString(sf::String(L"剩余时间: " + std::to_wstring(remainingTime) + L" 秒"));
     timerText.setPosition({900.f, 15.f});
     window.draw(timerText);
+
+    // ── 调试面板鼠标追踪（始终运行，避免 static 残留）──
+    static bool dbgClicked = false;
+    bool mouseDown = sf::Mouse::isButtonPressed(sf::Mouse::Button::Left);
+    if (!mouseDown) dbgClicked = false;
+
+    // ── F10 AI 手牌调试面板 ──
+    if (showAIDebug) {
+        float dbgX = 20.f, dbgY = 80.f, dbgW = 280.f;
+        int lines = static_cast<int>(playerDeck.aiHand.size());
+        const float lineH = 24.f;
+        const float padX = 10.f, padY = 6.f;
+        const float titleH = 22.f;
+        sf::Vector2f dbgMpos = window.mapPixelToCoords(sf::Mouse::getPosition(window));
+
+        // === 区域 1：AI 手牌列表 ===
+        float sec1H = titleH + lines * lineH + padY * 2;
+        sf::RectangleShape bg1({dbgW, sec1H});
+        bg1.setPosition({dbgX, dbgY});
+        bg1.setFillColor(sf::Color(20, 20, 40, 200));
+        bg1.setOutlineColor(sf::Color(100, 100, 180, 150));
+        bg1.setOutlineThickness(1.f);
+        window.draw(bg1);
+        // 标题行
+        uiText.setFont(font);
+        uiText.setCharacterSize(18);
+        uiText.setFillColor(sf::Color(255, 220, 100));
+        uiText.setString(sf::String(L"[AI手牌] " + std::to_wstring(lines) + L"张  点击=立即打出"));
+        uiText.setPosition({dbgX + padX, dbgY + padY});
+        window.draw(uiText);
+        // 分隔线
+        sf::RectangleShape sep1({dbgW - padX * 2, 1.f});
+        sep1.setPosition({dbgX + padX, dbgY + titleH + padY});
+        sep1.setFillColor(sf::Color(120, 120, 180, 120));
+        window.draw(sep1);
+        // 卡牌条目
+        std::vector<sf::FloatRect> aiCardRects;
+        for (int i = 0; i < lines; ++i) {
+            float ty = dbgY + titleH + padY + 4.f + i * lineH;
+            sf::RectangleShape rowBg({dbgW - padX * 2, lineH - 2.f});
+            rowBg.setPosition({dbgX + padX, ty - 1.f});
+            rowBg.setFillColor(sf::Color(40, 40, 70, 120));
+            window.draw(rowBg);
+            uiText.setCharacterSize(18);
+            uiText.setFillColor(sf::Color(200, 210, 255));
+            // 调试面板始终显示真实卡名（盲目等紫卡加 * 标记）
+            std::wstring aiName = playerDeck.aiHand[i].name;
+            if (playerDeck.aiHand[i].cardColor == 1 && playerDeck.aiHand[i].transferred)
+                aiName = L"*" + aiName;
+            uiText.setString(sf::String(aiName));
+            uiText.setPosition({dbgX + padX + 4.f, ty});
+            window.draw(uiText);
+            aiCardRects.push_back(sf::FloatRect({dbgX, ty}, {dbgW, lineH}));
+        }
+
+        // === 区域 2：全部卡牌模板（点击生成新卡入槽）===
+        static const Card cardTemplates[] = {
+            {1, L"连击", L"给予两次落子数", CardEffect::FORCE_DROP, 0, 0},
+            {3, L"隐忍", L"迫使敌方承受：\n六子连星为胜途", CardEffect::CHANGE_WIN_RULE, 6, 0},
+            {4, L"笼络", L"销毁己方一个棋子\n转化敌方一个棋子", CardEffect::CONVERT_PIECE, 0, 0},
+            {5, L"破釜沉舟", L"将手牌放回牌库\n根据放回的数量\n销毁敌方棋子", CardEffect::SACRIFICE_HAND, 0, 0},
+            {6, L"疫病", L"指定一颗敌方棋子\n使其患上疫病\n患病棋子每回合都\n有概率死亡并试图\n传染给其他棋子\n玩家棋子也有患病\n风险", CardEffect::PLAGUE, 0, 0},
+            {7, L"隔离", L"使患病棋子在三回\n合后痊愈", CardEffect::QUARANTINE, 4, 0},
+            {8, L"盲目", L"持有者将无法辨清\n自己的手牌\n三回合后消退\n且三子连星将导致\n消退时间延后", CardEffect::BLIND, 4, 1},
+        };
+        const int tmplCount = sizeof(cardTemplates) / sizeof(cardTemplates[0]);
+        float sec2Y = dbgY + sec1H + 6.f;
+        float sec2H = titleH + tmplCount * lineH + padY * 2;
+        sf::RectangleShape bg2({dbgW, sec2H});
+        bg2.setPosition({dbgX, sec2Y});
+        bg2.setFillColor(sf::Color(40, 20, 20, 200));
+        bg2.setOutlineColor(sf::Color(180, 100, 100, 150));
+        bg2.setOutlineThickness(1.f);
+        window.draw(bg2);
+        uiText.setCharacterSize(18);
+        uiText.setFillColor(sf::Color(255, 180, 140));
+        uiText.setString(sf::String(L"[卡牌模板] 点击=生成新卡入槽"));
+        uiText.setPosition({dbgX + padX, sec2Y + padY});
+        window.draw(uiText);
+        sf::RectangleShape sep2({dbgW - padX * 2, 1.f});
+        sep2.setPosition({dbgX + padX, sec2Y + titleH + padY});
+        sep2.setFillColor(sf::Color(180, 120, 120, 120));
+        window.draw(sep2);
+        std::vector<sf::FloatRect> tmplRects;
+        for (int i = 0; i < tmplCount; ++i) {
+            float ty = sec2Y + titleH + padY + 4.f + i * lineH;
+            uiText.setCharacterSize(18);
+            // 橙卡/紫卡用不同颜色
+            uiText.setFillColor(cardTemplates[i].cardColor == 1
+                ? sf::Color(220, 160, 255) : sf::Color(255, 200, 160));
+            uiText.setString(sf::String(cardTemplates[i].name));
+            uiText.setPosition({dbgX + padX + 4.f, ty});
+            window.draw(uiText);
+            tmplRects.push_back(sf::FloatRect({dbgX, ty}, {dbgW, lineH}));
+        }
+        // === 区域 3：生成新卡加入 AI 手牌 ===
+        float sec3Y = sec2Y + sec2H + 6.f;
+        float sec3H = titleH + tmplCount * lineH + padY * 2;
+        sf::RectangleShape bg3({dbgW, sec3H});
+        bg3.setPosition({dbgX, sec3Y});
+        bg3.setFillColor(sf::Color(20, 20, 40, 200));
+        bg3.setOutlineColor(sf::Color(100, 100, 180, 150));
+        bg3.setOutlineThickness(1.f);
+        window.draw(bg3);
+        uiText.setCharacterSize(18);
+        uiText.setFillColor(sf::Color(180, 200, 255));
+        uiText.setString(sf::String(L"[生成卡→AI] 点击=加入AI手牌"));
+        uiText.setPosition({dbgX + padX, sec3Y + padY});
+        window.draw(uiText);
+        sf::RectangleShape sep3({dbgW - padX * 2, 1.f});
+        sep3.setPosition({dbgX + padX, sec3Y + titleH + padY});
+        sep3.setFillColor(sf::Color(120, 120, 180, 120));
+        window.draw(sep3);
+        std::vector<sf::FloatRect> aiGenRects;
+        for (int i = 0; i < tmplCount; ++i) {
+            float ty = sec3Y + titleH + padY + 4.f + i * lineH;
+            uiText.setCharacterSize(18);
+            uiText.setFillColor(cardTemplates[i].cardColor == 1
+                ? sf::Color(220, 160, 255) : sf::Color(255, 200, 160));
+            uiText.setString(sf::String(cardTemplates[i].name));
+            uiText.setPosition({dbgX + padX + 4.f, ty});
+            window.draw(uiText);
+            aiGenRects.push_back(sf::FloatRect({dbgX, ty}, {dbgW, lineH}));
+        }
+
+        // === 区域 4：牌库信息 ===
+        float sec4Y = sec3Y + sec3H + 6.f;
+        float sec4H = titleH + padY;
+        sf::RectangleShape bg4({dbgW, sec4H});
+        bg4.setPosition({dbgX, sec4Y});
+        bg4.setFillColor(sf::Color(20, 40, 20, 200));
+        bg4.setOutlineColor(sf::Color(100, 180, 100, 150));
+        bg4.setOutlineThickness(1.f);
+        window.draw(bg4);
+        uiText.setCharacterSize(16);
+        uiText.setFillColor(sf::Color(180, 255, 180));
+        uiText.setString(sf::String(L"牌库:" + std::to_wstring(playerDeck.deck.size()) +
+                                    L"  弃牌:" + std::to_wstring(playerDeck.discardPile.size())));
+        uiText.setPosition({dbgX + padX, sec4Y + padY});
+        window.draw(uiText);
+
+        // === 区域 5：无敌按钮 ===
+        float sec5Y = sec4Y + sec4H + 6.f;
+        float sec5H = lineH + padY * 2;
+        sf::RectangleShape bg5({dbgW, sec5H});
+        bg5.setPosition({dbgX, sec5Y});
+        bg5.setFillColor(playerInvincible ? sf::Color(80, 20, 20, 220) : sf::Color(20, 20, 20, 200));
+        bg5.setOutlineColor(playerInvincible ? sf::Color(255, 80, 80, 200) : sf::Color(120, 120, 120, 150));
+        bg5.setOutlineThickness(1.f);
+        window.draw(bg5);
+        uiText.setCharacterSize(18);
+        uiText.setFillColor(playerInvincible ? sf::Color(255, 100, 100) : sf::Color(200, 200, 200));
+        uiText.setString(sf::String(playerInvincible ? L"[无敌: ON] 点击关闭" : L"[无敌: OFF] 点击开启"));
+        uiText.setPosition({dbgX + padX, sec5Y + padY});
+        window.draw(uiText);
+        sf::FloatRect invRect({dbgX, sec5Y}, {dbgW, sec5H});
+
+        // === 区域 6：无敌 Plus 按钮 ===
+        float sec6Y = sec5Y + sec5H + 6.f;
+        float sec6H = lineH + padY * 2;
+        sf::RectangleShape bg6({dbgW, sec6H});
+        bg6.setPosition({dbgX, sec6Y});
+        bg6.setFillColor(playerInvinciblePlus ? sf::Color(80, 0, 80, 220) : sf::Color(20, 20, 20, 200));
+        bg6.setOutlineColor(playerInvinciblePlus ? sf::Color(255, 80, 255, 200) : sf::Color(120, 120, 120, 150));
+        bg6.setOutlineThickness(1.f);
+        window.draw(bg6);
+        uiText.setCharacterSize(18);
+        uiText.setFillColor(playerInvinciblePlus ? sf::Color(255, 150, 255) : sf::Color(200, 200, 200));
+        uiText.setString(sf::String(playerInvinciblePlus ? L"[无敌Plus: ON] 点击关闭" : L"[无敌Plus: OFF] 点击开启"));
+        uiText.setPosition({dbgX + padX, sec6Y + padY});
+        window.draw(uiText);
+        sf::FloatRect invPlusRect({dbgX, sec6Y}, {dbgW, sec6H});
+
+        // === 统一点击处理（防连点，放最后确保所有区域已声明）===
+        if (mouseDown && !dbgClicked) {
+            dbgClicked = true;
+            bool done = false;
+            if (invPlusRect.contains(dbgMpos)) {
+                playerInvinciblePlus = !playerInvinciblePlus;
+                int aiC = (playerColorPref == 1) ? 2 : 1;
+                chessboard.setWinCondition(aiC, playerInvinciblePlus ? 16 : (playerInvincible ? 16 : 5));
+                chessboard.setWinCondition(playerColorPref, playerInvinciblePlus ? 16 : 5);
+                std::cout << "[Debug] 无敌Plus: " << (playerInvinciblePlus ? "ON" : "OFF") << std::endl;
+                done = true;
+            }
+            if (invRect.contains(dbgMpos) && !done) {
+                playerInvincible = !playerInvincible;
+                playerInvinciblePlus = false;
+                int aiC = (playerColorPref == 1) ? 2 : 1;
+                chessboard.setWinCondition(aiC, playerInvincible ? 16 : 5);
+                chessboard.setWinCondition(playerColorPref, 5);
+                std::cout << "[Debug] 无敌: " << (playerInvincible ? "ON(AI需15连)" : "OFF") << std::endl;
+                done = true;
+            }
+            for (size_t i = 0; i < aiCardRects.size() && !done; ++i) {
+                if (aiCardRects[i].contains(dbgMpos) && i < playerDeck.aiHand.size()) {
+                    std::cout << "[Debug] AI 立即打出: " << playerDeck.aiHand[i].name.c_str() << std::endl;
+                    // 走完整 AI 出牌动画（Portal→Reader→展示→效果）
+                    startAICardPlay(static_cast<int>(i));
+                    done = true;
+                }
+            }
+            for (size_t i = 0; i < tmplRects.size() && !done; ++i) {
+                if (tmplRects[i].contains(dbgMpos)) {
+                    playerDeck.hand.push_back(cardTemplates[i]);
+                    handSlotAssign.push_back(1);
+                    newCardJustDrawn = true; cardAnimClock.restart(); isAnimatingCard = true;
+                    std::cout << "[Debug] 生成 " << cardTemplates[i].name.c_str() << " → 玩家卡槽" << std::endl;
+                    done = true;
+                }
+            }
+            for (size_t i = 0; i < aiGenRects.size() && !done; ++i) {
+                if (aiGenRects[i].contains(dbgMpos)) {
+                    playerDeck.aiHand.push_back(cardTemplates[i]);
+                    std::cout << "[Debug] 生成 " << cardTemplates[i].name.c_str() << " → AI 手牌" << std::endl;
+                    done = true;
+                }
+            }
+        }
+    }
 
     // ── 暂停覆盖层（淡入/淡出各 0.5s）──
     float fadeElapsed = pauseFadeClock.getElapsedTime().asSeconds();
@@ -3878,7 +5030,9 @@ void GameEngine::settleActionPoints() {
 
         // 自动为下一个接管回合的玩家刷新基础行动点
         initActionPointsForTurn();
-    } 
+        // 切换回合时处理紫卡诅咒（每次换边都触发，不依赖 update 帧检测）
+        processPurpleCurses();
+    }
     else {
         std::cout << "[ActionPoint] 结算完成：仍有可用点数，请继续行动。⏳ 回合倒计时安全锁死，不予重置。" << std::endl;
     }
@@ -3967,6 +5121,51 @@ void GameEngine::processInfection() {
     for (int r = 0; r < 15; ++r)
         for (int c = 0; c < 15; ++c)
             if (newInfected[r][c]) { infected[r][c] = true; infectionActive[r][c] = false; }
+}
+
+// ── 紫卡诅咒处理（盲目等）──
+void GameEngine::processPurpleCurses() {
+    // 只在持有者自己的回合减计数（一回合=该方行动结束）
+    bool isPlayerTurn = (currentTurn == playerColorPref ||
+                         currentState == GameState::GAME_PVP);
+    // PVP 时双方共用 playerDeck.hand，始终处理
+    // PVE 时只处理当前回合方的诅咒
+    if (isPlayerTurn || currentState == GameState::GAME_PVP) {
+        for (size_t i = 0; i < playerDeck.hand.size(); ) {
+            auto& c = playerDeck.hand[i];
+            if (c.cardColor == 1 && c.transferred && c.effect == CardEffect::BLIND) {
+                c.value--;
+                std::cout << "[Blind] 玩家盲目剩余: " << c.value << std::endl;
+                if (c.value <= 0) {
+                    if (!curseRemoving) {
+                        curseRemoving = true;
+                        curseRemovingIdx = (int)i;
+                        curseRemoveClock.restart();
+                        curseRemoveFragsInit = false;
+                        std::cout << "[Blind] 玩家盲目到期，启动移除动画" << std::endl;
+                    }
+                    ++i;
+                    continue; // 跳过erase，动画结束后处理
+                }
+            }
+            ++i;
+        }
+    }
+    if (!isPlayerTurn || currentState == GameState::GAME_PVP) {
+        for (size_t i = 0; i < playerDeck.aiHand.size(); ) {
+            auto& c = playerDeck.aiHand[i];
+            if (c.cardColor == 1 && c.transferred && c.effect == CardEffect::BLIND) {
+                c.value--;
+                std::cout << "[Blind] AI 盲目剩余: " << c.value << std::endl;
+                if (c.value <= 0) {
+                    playerDeck.aiHand.erase(playerDeck.aiHand.begin() + i);
+                    std::cout << "[Blind] AI 盲目已移除" << std::endl;
+                    continue;
+                }
+            }
+            ++i;
+        }
+    }
 }
 
 // 6. 卡牌效果分发器：湮灭完成后由 GameEngine 统一调度
@@ -4109,4 +5308,36 @@ void GameEngine::addCrisisTime(float seconds) {
         std::cout << "[Audio] 危机触发 —— battle_02 延长 " << seconds
                   << "s，剩余 " << battle02Remaining << "s" << std::endl;
     }
+}
+
+// ── 卡牌碎片缓存 ──
+void GameEngine::initCardFragmentCache() {
+    auto gen = [](sf::Texture& tex, std::vector<Fragment>& out) {
+        out.clear();
+        sf::Vector2u ts = tex.getSize();
+        if (ts.x == 0 || ts.y == 0) return;
+        const int COLS = 36, ROWS = 36;
+        float cw = (float)ts.x / COLS;
+        float rh = (float)ts.y / ROWS;
+        for (int r = 0; r < ROWS; ++r) {
+            for (int c = 0; c < COLS; ++c) {
+                Fragment f;
+                int rx = (int)(cw * c + cw * (rand() % 12 - 6) / 100.f);
+                int ry = (int)(rh * r + rh * (rand() % 6  - 3) / 100.f);
+                int rw = (int)(cw + cw * (rand() % 10 - 5) / 100.f);
+                int rh2 =(int)(rh + rh * (rand() % 6  - 3) / 100.f);
+                if (rx < 0) rx = 0; if (ry < 0) ry = 0;
+                if (rx + rw > (int)ts.x) rw = ts.x - rx;
+                if (ry + rh2 > (int)ts.y) rh2 = ts.y - ry;
+                if (rw < 1) rw = 1; if (rh2 < 1) rh2 = 1;
+                f.texRect = sf::IntRect({rx, ry}, {rw, rh2});
+                f.released = false; f.alpha = 255.f;
+                out.push_back(f);
+            }
+        }
+    };
+    gen(newCardTexture, cardFragCache);
+    gen(purpleCardTexture, cardFragCachePurple);
+    std::cout << "[CardFragment] 卡牌碎片缓存: 橙=" << cardFragCache.size()
+              << " 紫=" << cardFragCachePurple.size() << std::endl;
 }

@@ -13,7 +13,8 @@ enum class CardEffect {
     REMOVE_OPPONENT,    // 移除对方棋子
     EXTRA_TURN,         // 额外回合
     PLAGUE,             // 疫病：感染敌方棋子，每回合概率销毁+传播
-    QUARANTINE          // 隔离：三回合后清除所有疫病标记
+    QUARANTINE,         // 隔离：三回合后清除所有疫病标记
+    BLIND               // 盲目：持有者手牌描述乱码/AI无法辨识，2回合后移除
 };
 
 struct Card {
@@ -21,8 +22,9 @@ struct Card {
     std::wstring name;
     std::wstring description;
     CardEffect effect;
-    int value;         // 效果参数，比如修改规则为6时，value=6
-    int cardColor = 0; // 0=橙卡（默认），1=紫卡
+    int value;           // 效果参数，比如修改规则为6时，value=6
+    int cardColor = 0;   // 0=橙卡（默认），1=紫卡
+    bool transferred = false; // 紫卡传送标记：已传送的紫卡生效，且不可再次传送
 };
 
 #endif

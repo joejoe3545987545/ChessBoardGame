@@ -64,10 +64,53 @@ Chessboard::Chessboard()
         }
     }
 
+    initFragmentCache();
     reset();
 }
 
 Chessboard::~Chessboard() {}
+
+// ── 预切分棋子纹理为 8×8 随机碎片 ──
+void Chessboard::initFragmentCache() {
+    auto genFragments = [](sf::Texture& tex, std::vector<Fragment>& out) {
+        out.clear();
+        sf::Vector2u ts = tex.getSize();
+        if (ts.x == 0 || ts.y == 0) return;
+        const int COLS = 12, ROWS = 12;
+        float cw = (float)ts.x / COLS;
+        float rh = (float)ts.y / ROWS;
+        for (int r = 0; r < ROWS; ++r) {
+            for (int c = 0; c < COLS; ++c) {
+                Fragment f;
+                // 基础网格 + 随机扰动（Y方向收紧保持逐行擦除线清晰）
+                int rx = (int)(cw * c + cw * (rand() % 16 - 8) / 100.f);
+                int ry = (int)(rh * r + rh * (rand() % 8  - 4) / 100.f);
+                int rw = (int)(cw + cw * (rand() % 14 - 7) / 100.f);
+                int rh2 = (int)(rh + rh * (rand() % 8  - 4) / 100.f);
+                // 夹紧到纹理边界
+                if (rx < 0) rx = 0;
+                if (ry < 0) ry = 0;
+                if (rx + rw > (int)ts.x) rw = ts.x - rx;
+                if (ry + rh2 > (int)ts.y) rh2 = ts.y - ry;
+                if (rw < 1) rw = 1;
+                if (rh2 < 1) rh2 = 1;
+                f.texRect = sf::IntRect({rx, ry}, {rw, rh2});
+                // 随机物理参数（运行时赋值）
+                f.vel = {0.f, 0.f};
+                f.rotSpeed = 0.f;
+                f.released = false;
+                f.alpha = 255.f;
+                f.rotation = 0.f;
+                f.pos = {0.f, 0.f};
+                out.push_back(f);
+            }
+        }
+    };
+    genFragments(blackTexture, blackFragments);
+    genFragments(whiteTexture, whiteFragments);
+    std::cout << "[Fragment] 碎片缓存已生成: 黑=" << blackFragments.size()
+              << " 白=" << whiteFragments.size() << std::endl;
+}
 
 void Chessboard::reset() {
     for (int i = 0; i < 15; ++i) {
@@ -82,6 +125,12 @@ void Chessboard::reset() {
     pieceAnimType = 0;     // 清除棋子动画
     animRow = animCol = -1;
     dropAnimating = false;   // 清除落子动画
+    activeFragments.clear();
+    convertFragments.clear();
+    decayFragments.clear();
+    decayColor = 0;
+    fragLastElapsed = 0.f;
+    convFragLastElapsed = 0.f;
 
     // 清除历史和回放状态
     moveHistory.clear();
@@ -96,29 +145,51 @@ int Chessboard::checkPattern(int row, int col, int& outDir) {
     int dx[] = {1, 0, 1, 1};
     int dy[] = {0, 1, 1, -1};
     for (int i = 0; i < 4; ++i) {
+        // 沿该方向收集所有连续同色棋子
+        std::vector<std::pair<int,int>> line;
+        for (int r = row, c = col; r >= 0 && r < 15 && c >= 0 && c < 15 && grid[r][c] == turn; r += dy[i], c += dx[i])
+            line.push_back({r, c});
+        // 去掉当前棋子（前面已加），换反方向
+        // 实际上上面的循环已包含当前棋子，直接整理：从一端到另一端扫描
+
         int count = 1;
         int r1 = row + dy[i], c1 = col + dx[i];
         while (r1 >= 0 && r1 < 15 && c1 >= 0 && c1 < 15 && grid[r1][c1] == turn) { count++; r1 += dy[i]; c1 += dx[i]; }
         int r2 = row - dy[i], c2 = col - dx[i];
         while (r2 >= 0 && r2 < 15 && c2 >= 0 && c2 < 15 && grid[r2][c2] == turn) { count++; r2 -= dy[i]; c2 -= dx[i]; }
 
-        if (count == 3 || count == 4) {
-            // 检查连线上是否有棋子已被该方向标记
-            bool blocked = false;
+        if (count >= 3) {
+            // 搜索是否存在 3 连段全部未被该方向标记
             int bit = (1 << i);
-            // 沿正方向扫描
-            for (int r = row, c = col; r >= 0 && r < 15 && c >= 0 && c < 15 && grid[r][c] == turn; r += dy[i], c += dx[i]) {
-                if (usedMask[r][c] & bit) { blocked = true; break; }
+            // 找线段起点（最末端）
+            int sr = row, sc = col;
+            while (true) {
+                int nr = sr - dy[i], nc = sc - dx[i];
+                if (nr >= 0 && nr < 15 && nc >= 0 && nc < 15 && grid[nr][nc] == turn)
+                    { sr = nr; sc = nc; }
+                else break;
             }
-            // 沿反方向扫描
-            if (!blocked) {
-                for (int r = row - dy[i], c = col - dx[i]; r >= 0 && r < 15 && c >= 0 && c < 15 && grid[r][c] == turn; r -= dy[i], c -= dx[i]) {
-                    if (usedMask[r][c] & bit) { blocked = true; break; }
+            // 从起点扫描，检查每个连续 3 段
+            int cr = sr, cc = sc;
+            while (cr >= 0 && cr < 15 && cc >= 0 && cc < 15 && grid[cr][cc] == turn) {
+                // 取 cr,cc 开始的连续 3 子
+                int r[3], c[3]; bool valid = true;
+                for (int k = 0; k < 3; ++k) {
+                    int nr = cr + k * dy[i], nc = cc + k * dx[i];
+                    if (nr < 0 || nr >= 15 || nc < 0 || nc >= 15 || grid[nr][nc] != turn)
+                        { valid = false; break; }
+                    r[k] = nr; c[k] = nc;
                 }
-            }
-            if (!blocked) {
-                outDir = i;
-                return count; // 3 或 4
+                if (valid) {
+                    bool allUnmarked = true;
+                    for (int k = 0; k < 3; ++k)
+                        if (usedMask[r[k]][c[k]] & bit) { allUnmarked = false; break; }
+                    if (allUnmarked) {
+                        outDir = i;
+                        return (count >= 3) ? ((count >= 4) ? 4 : 3) : 0;
+                    }
+                }
+                cr += dy[i]; cc += dx[i];
             }
         }
     }
@@ -132,12 +203,37 @@ void Chessboard::markPatternUsed(int row, int col, int dir) {
     int dx[] = {1, 0, 1, 1};
     int dy[] = {0, 1, 1, -1};
     int bit = (1 << dir);
-    // 正方向
-    for (int r = row, c = col; r >= 0 && r < 15 && c >= 0 && c < 15 && grid[r][c] == turn; r += dy[dir], c += dx[dir])
-        usedMask[r][c] |= bit;
-    // 反方向
-    for (int r = row - dy[dir], c = col - dx[dir]; r >= 0 && r < 15 && c >= 0 && c < 15 && grid[r][c] == turn; r -= dy[dir], c -= dx[dir])
-        usedMask[r][c] |= bit;
+
+    // 找线段起点
+    int sr = row, sc = col;
+    while (true) {
+        int nr = sr - dy[dir], nc = sc - dx[dir];
+        if (nr >= 0 && nr < 15 && nc >= 0 && nc < 15 && grid[nr][nc] == turn)
+            { sr = nr; sc = nc; }
+        else break;
+    }
+    // 从起点扫描，找到第一个全未标记的 3 连段，标记之
+    int cr = sr, cc = sc;
+    while (cr >= 0 && cr < 15 && cc >= 0 && cc < 15 && grid[cr][cc] == turn) {
+        int r[3], c[3]; bool valid = true;
+        for (int k = 0; k < 3; ++k) {
+            int nr = cr + k * dy[dir], nc = cc + k * dx[dir];
+            if (nr < 0 || nr >= 15 || nc < 0 || nc >= 15 || grid[nr][nc] != turn)
+                { valid = false; break; }
+            r[k] = nr; c[k] = nc;
+        }
+        if (valid) {
+            bool allUnmarked = true;
+            for (int k = 0; k < 3; ++k)
+                if (usedMask[r[k]][c[k]] & bit) { allUnmarked = false; break; }
+            if (allUnmarked) {
+                for (int k = 0; k < 3; ++k)
+                    usedMask[r[k]][c[k]] |= bit;
+                return;
+            }
+        }
+        cr += dy[dir]; cc += dx[dir];
+    }
 }
 
 int Chessboard::getPiece(int row, int col) const {
@@ -395,7 +491,9 @@ void Chessboard::draw(sf::RenderTarget& target) {
     // 2. 棋子渲染（含动画效果）
     for (int i = 0; i < 15; ++i) {
         for (int j = 0; j < 15; ++j) {
-            bool isAnimPiece = (i == animRow && j == animCol && pieceAnimType != 0);
+            bool hasDecay = (i == animRow && j == animCol && pieceAnimType == 0 &&
+                             (!activeFragments.empty() || !convertFragments.empty()));
+            bool isAnimPiece = hasDecay || (i == animRow && j == animCol && pieceAnimType != 0);
             int displayColor = grid[i][j];
             if (displayColor == 0 && !isAnimPiece) continue;
             // 落子动画期间跳过该格的静态棋子（由 drawDropAnim 绘制漂浮棋子）
@@ -429,21 +527,274 @@ void Chessboard::draw(sf::RenderTarget& target) {
 
             if (isAnimPiece) {
                 if (pieceAnimType == 1) {
-                    // 销毁：clip 收缩 1→0 + alpha 255→0
-                    float h = 1.f - t;
-                    uint8_t a = (uint8_t)(255 * (1.f - t));
-                    if (h > 0.f) drawPiece(pieceAnimFrom, h, a);
+                    // ── 🌟 碎片销毁动画 ──
+                    sf::Sprite& sp = (pieceAnimFrom == 1) ? blackSprite : whiteSprite;
+                    sf::Texture& tx = (pieceAnimFrom == 1) ? blackTexture : whiteTexture;
+                    sf::Vector2u ts = tx.getSize();
+                    if (ts.x > 0 && ts.y > 0 && !activeFragments.empty()) {
+                        float scaleX = 68.4f / (float)ts.x;
+                        float scaleY = 68.4f / (float)ts.y;
+                        // 擦除线（纹理空间，自下往上）
+                        float clipHeight = ts.y * (1.f - t);
+                        float px, py;
+                        getGridPosition(i, j, px, py);
+
+                        // 1. 画未粉碎部分：完整裁剪纹理，无缝
+                        int clipH = (int)clipHeight;
+                        if (clipH > 0) {
+                            sp.setOrigin({ts.x / 2.f, ts.y / 2.f});
+                            sp.setScale({scaleX, scaleY});
+                            sp.setTextureRect(sf::IntRect({0, 0}, {(int)ts.x, clipH}));
+                            sp.setPosition({px, py});
+                            sp.setColor(sf::Color(255, 255, 255, 255));
+                            target.draw(sp);
+                        }
+
+                        // 2. dt 计算
+                        float rawElapsed = pieceAnimClock.getElapsedTime().asSeconds();
+                        float dt = rawElapsed - fragLastElapsed;
+                        if (dt < 0.f) dt = 0.f;
+                        if (dt > 0.1f) dt = 0.016f;
+                        fragLastElapsed = rawElapsed;
+
+                        // 3. 遍历碎片：标记释放 + 物理更新 + 绘制已释放碎片
+                        for (auto& frag : activeFragments) {
+                            if (!frag.released) {
+                                float fragTop = (float)frag.texRect.position.y;
+                                if (fragTop > clipHeight) {
+                                    frag.released = true;
+                                    float fcx = frag.texRect.size.x / 2.f;
+                                    float fcy = frag.texRect.size.y / 2.f;
+                                    frag.pos.x = px + (frag.texRect.position.x + fcx - ts.x / 2.f) * scaleX;
+                                    frag.pos.y = py + (frag.texRect.position.y + fcy - ts.y / 2.f) * scaleY;
+                                }
+                            }
+                            if (frag.released) {
+                                // 物理更新
+                                frag.vel.y += 800.f * dt;
+                                frag.pos += frag.vel * dt;
+                                frag.rotation += frag.rotSpeed * dt;
+                                frag.fadeTimer += dt;
+                                float fp = frag.fadeTimer / 0.85f;
+                                if (fp > 1.f) fp = 1.f;
+                                frag.alpha = 255.f * (1.f - fp * fp * (3.f - 2.f * fp));
+                                // 绘制
+                                float fcx = frag.texRect.size.x / 2.f;
+                                float fcy = frag.texRect.size.y / 2.f;
+                                sp.setOrigin({fcx, fcy});
+                                sp.setTextureRect(frag.texRect);
+                                sp.setPosition(frag.pos);
+                                sp.setRotation(sf::degrees(frag.rotation));
+                                sp.setColor(sf::Color(255, 255, 255, (uint8_t)frag.alpha));
+                                target.draw(sp);
+                            }
+                        }
+                        // 恢复精灵默认状态
+                        sp.setOrigin({ts.x / 2.f, ts.y / 2.f});
+                        sp.setTextureRect(sf::IntRect({0, 0}, {(int)ts.x, (int)ts.y}));
+                        sp.setRotation(sf::degrees(0.f));
+                        sp.setColor(sf::Color(255, 255, 255, 255));
+                    }
                 } else if (pieceAnimType == 2) {
-                    // 转化：toColor 全图 alpha 0→255，fromColor clip 收缩 1→0 alpha 255→0
-                    uint8_t aTo = (uint8_t)(255 * t);
-                    uint8_t aFrom = (uint8_t)(255 * (1.f - t));
-                    drawPiece(pieceAnimTo, 1.f, aTo);
-                    float h = 1.f - t;
-                    if (h > 0.f) drawPiece(pieceAnimFrom, h, aFrom);
+                    // ── 转化动画：旧色粉碎 + 新色自下往上生长 ──
+                    sf::Sprite& spFrom = (pieceAnimFrom == 1) ? blackSprite : whiteSprite;
+                    sf::Texture& txFrom = (pieceAnimFrom == 1) ? blackTexture : whiteTexture;
+                    sf::Sprite& spTo   = (pieceAnimTo   == 1) ? blackSprite : whiteSprite;
+                    sf::Texture& txTo   = (pieceAnimTo   == 1) ? blackTexture : whiteTexture;
+                    sf::Vector2u ts = txFrom.getSize();
+                    sf::Vector2u tsTo = txTo.getSize();
+                    if (ts.x > 0 && ts.y > 0 && tsTo.x > 0 && tsTo.y > 0 &&
+                        !activeFragments.empty()) {
+                        float wipeFrac = 1.f - t;
+                        float clipFrom = ts.y * wipeFrac;
+                        float clipTo   = tsTo.y * wipeFrac;
+                        float scaleX = 68.4f / (float)ts.x;
+                        float scaleY = 68.4f / (float)ts.y;
+                        float toScaleX = 68.4f / (float)tsTo.x;
+                        float toScaleY = 68.4f / (float)tsTo.y;
+                        float px, py;
+                        getGridPosition(i, j, px, py);
+                        float rawElapsed = pieceAnimClock.getElapsedTime().asSeconds();
+                        float dt = rawElapsed - fragLastElapsed;
+                        if (dt < 0.f) dt = 0.f; if (dt > 0.1f) dt = 0.016f;
+                        fragLastElapsed = rawElapsed;
+
+                        // ── 底层：新色，自下往上生长（origin=可见底部中心，position=格子底部）──
+                        float visH = tsTo.y - clipTo;
+                        if (visH > 0.f) {
+                            spTo.setOrigin({tsTo.x / 2.f, visH}); // 可见区域底部中心
+                            spTo.setScale({toScaleX, toScaleY});
+                            spTo.setTextureRect(sf::IntRect({0, (int)clipTo}, {(int)tsTo.x, (int)visH}));
+                            spTo.setPosition({px, py + tsTo.y / 2.f * toScaleY}); // 格子底部
+                            spTo.setColor(sf::Color(255, 255, 255, 255));
+                            target.draw(spTo);
+                        }
+                        spTo.setOrigin({tsTo.x / 2.f, tsTo.y / 2.f});
+                        spTo.setTextureRect(sf::IntRect({0, 0}, {(int)tsTo.x, (int)tsTo.y}));
+
+                        // ── 上层：旧色粉碎（同销毁动画）──
+                        int clipH = (int)clipFrom;
+                        if (clipH > 0) {
+                            spFrom.setOrigin({ts.x / 2.f, ts.y / 2.f});
+                            spFrom.setScale({scaleX, scaleY});
+                            spFrom.setTextureRect(sf::IntRect({0, 0}, {(int)ts.x, clipH}));
+                            spFrom.setPosition({px, py});
+                            spFrom.setColor(sf::Color(255, 255, 255, 255));
+                            target.draw(spFrom);
+                        }
+                        for (auto& frag : activeFragments) {
+                            if (!frag.released) {
+                                if ((float)frag.texRect.position.y > clipFrom) {
+                                    frag.released = true;
+                                    float fcx = frag.texRect.size.x / 2.f;
+                                    float fcy = frag.texRect.size.y / 2.f;
+                                    frag.pos.x = px + (frag.texRect.position.x + fcx - ts.x / 2.f) * scaleX;
+                                    frag.pos.y = py + (frag.texRect.position.y + fcy - ts.y / 2.f) * scaleY;
+                                }
+                            }
+                            if (frag.released) {
+                                frag.vel.y += 800.f * dt;
+                                frag.pos += frag.vel * dt;
+                                frag.rotation += frag.rotSpeed * dt;
+                                frag.fadeTimer += dt;
+                                float fp = frag.fadeTimer / 0.85f;
+                                if (fp > 1.f) fp = 1.f;
+                                frag.alpha = 255.f * (1.f - fp * fp * (3.f - 2.f * fp));
+                                float fcx = frag.texRect.size.x / 2.f;
+                                float fcy = frag.texRect.size.y / 2.f;
+                                spFrom.setOrigin({fcx, fcy});
+                                spFrom.setTextureRect(frag.texRect);
+                                spFrom.setPosition(frag.pos);
+                                spFrom.setRotation(sf::degrees(frag.rotation));
+                                spFrom.setColor(sf::Color(255, 255, 255, (uint8_t)frag.alpha));
+                                target.draw(spFrom);
+                            }
+                        }
+                        spFrom.setTextureRect(sf::IntRect({0, 0}, {(int)ts.x, (int)ts.y}));
+                        spFrom.setOrigin({ts.x / 2.f, ts.y / 2.f});
+                        spFrom.setRotation(sf::degrees(0.f));
+                        spFrom.setColor(sf::Color(255, 255, 255, 255));
+
+                        // ── 新色聚合碎片（旧色之后画，在旧色完整部分之后但在旧碎片之下）──
+                        float dtConv = rawElapsed - convFragLastElapsed;
+                        if (dtConv < 0.f) dtConv = 0.f; if (dtConv > 0.1f) dtConv = 0.016f;
+                        convFragLastElapsed = rawElapsed;
+                        float releaseZone = tsTo.y * 0.25f;
+                        for (auto& frag : convertFragments) {
+                            float fcx = frag.texRect.size.x / 2.f;
+                            float fcy = frag.texRect.size.y / 2.f;
+                            float tx = px + (frag.texRect.position.x + fcx - tsTo.x / 2.f) * toScaleX;
+                            float ty = py + (frag.texRect.position.y + fcy - tsTo.y / 2.f) * toScaleY;
+                            float fragBot = frag.texRect.position.y + frag.texRect.size.y;
+                            if (!frag.released && fragBot > clipTo && fragBot - clipTo < releaseZone) {
+                                frag.released = true;
+                                frag.targetPos = {tx, ty};
+                                frag.assembleTimer = 0.f;
+                            }
+                            if (frag.released) {
+                                frag.assembleTimer += dtConv;
+                                float prog = frag.assembleTimer / 0.35f;
+                                if (prog > 1.f) prog = 1.f;
+                                float eased = prog * prog * (3.f - 2.f * prog);
+                                frag.pos.x += (frag.targetPos.x - frag.pos.x) * 0.12f;
+                                frag.pos.y += (frag.targetPos.y - frag.pos.y) * 0.12f;
+                                frag.alpha = 255.f * eased;
+                                spTo.setOrigin({fcx, fcy});
+                                spTo.setTextureRect(frag.texRect);
+                                spTo.setPosition(frag.pos);
+                                spTo.setRotation(sf::degrees(frag.rotation * (1.f - eased)));
+                                spTo.setColor(sf::Color(255, 255, 255, (uint8_t)frag.alpha));
+                                target.draw(spTo);
+                            }
+                        }
+                        spTo.setOrigin({tsTo.x / 2.f, tsTo.y / 2.f});
+                        spTo.setTextureRect(sf::IntRect({0, 0}, {(int)tsTo.x, (int)tsTo.y}));
+                        spTo.setRotation(sf::degrees(0.f));
+                        spTo.setColor(sf::Color(255, 255, 255, 255));
+                    }
+                }
+            } else if (hasDecay) {
+                // ── 碎片残留衰减：动画结束但碎片继续下落/飞入直到自然淡出 ──
+                float rawD = pieceAnimClock.getElapsedTime().asSeconds();
+                float dtD = rawD - fragLastElapsed;
+                if (dtD < 0.f) dtD = 0.f; if (dtD > 0.1f) dtD = 0.016f;
+                fragLastElapsed = rawD;
+                bool allDone = true;
+                // 粉碎碎片（旧色）
+                if (!activeFragments.empty()) {
+                    sf::Sprite& sp = (pieceAnimFrom == 1) ? blackSprite : whiteSprite;
+                    sf::Texture& tx = (pieceAnimFrom == 1) ? blackTexture : whiteTexture;
+                    sf::Vector2u tsD = tx.getSize();
+                    if (tsD.x > 0 && tsD.y > 0) {
+                        for (auto& frag : activeFragments) {
+                            if (frag.alpha <= 0.f) continue;
+                            allDone = false;
+                            frag.vel.y += 800.f * dtD;
+                            frag.pos += frag.vel * dtD;
+                            frag.rotation += frag.rotSpeed * dtD;
+                            frag.fadeTimer += dtD;
+                            float fp2 = frag.fadeTimer / 0.85f;
+                            if (fp2 > 1.f) fp2 = 1.f;
+                            frag.alpha = 255.f * (1.f - fp2 * fp2 * (3.f - 2.f * fp2));
+                            float fcx = frag.texRect.size.x / 2.f;
+                            float fcy = frag.texRect.size.y / 2.f;
+                            sp.setOrigin({fcx, fcy});
+                            sp.setTextureRect(frag.texRect);
+                            sp.setPosition(frag.pos);
+                            sp.setRotation(sf::degrees(frag.rotation));
+                            sp.setColor(sf::Color(255, 255, 255, (uint8_t)frag.alpha));
+                            target.draw(sp);
+                        }
+                        sp.setOrigin({tsD.x / 2.f, tsD.y / 2.f});
+                        sp.setTextureRect(sf::IntRect({0, 0}, {(int)tsD.x, (int)tsD.y}));
+                        sp.setRotation(sf::degrees(0.f));
+                        sp.setColor(sf::Color(255, 255, 255, 255));
+                    }
+                }
+                if (allDone) {
+                    activeFragments.clear();
+                    convertFragments.clear();
+                    animRow = animCol = -1;
                 }
             } else {
                 drawPiece(displayColor, 1.f);
             }
+        }
+    }
+
+    // ── 残留衰减碎片（无网格位置，独立物理播放直到淡出）──
+    if (!decayFragments.empty()) {
+        sf::Sprite& spD = (decayColor == 1) ? blackSprite : whiteSprite;
+        sf::Texture& txD = (decayColor == 1) ? blackTexture : whiteTexture;
+        sf::Vector2u tsD = txD.getSize();
+        if (tsD.x > 0 && tsD.y > 0) {
+            for (size_t di = 0; di < decayFragments.size(); ) {
+                auto& frag = decayFragments[di];
+                if (frag.alpha > 0.f) {
+                    // 继续物理更新（固定 0.016s dt）
+                    frag.vel.y += 800.f * 0.016f;
+                    frag.pos += frag.vel * 0.016f;
+                    frag.fadeTimer += 0.016f;
+                    float fp3 = frag.fadeTimer / 0.85f;
+                    if (fp3 > 1.f) fp3 = 1.f;
+                    frag.alpha = 255.f * (1.f - fp3 * fp3 * (3.f - 2.f * fp3));
+                }
+                if (frag.alpha <= 0.f) {
+                    decayFragments.erase(decayFragments.begin() + di);
+                    continue;
+                }
+                float fcx = frag.texRect.size.x / 2.f;
+                float fcy = frag.texRect.size.y / 2.f;
+                spD.setOrigin({fcx, fcy});
+                spD.setTextureRect(frag.texRect);
+                spD.setPosition(frag.pos);
+                spD.setColor(sf::Color(255, 255, 255, (uint8_t)frag.alpha));
+                target.draw(spD);
+                ++di;
+            }
+            spD.setOrigin({tsD.x / 2.f, tsD.y / 2.f});
+            spD.setTextureRect(sf::IntRect({0, 0}, {(int)tsD.x, (int)tsD.y}));
+            spD.setColor(sf::Color(255, 255, 255, 255));
         }
     }
 
@@ -594,11 +945,34 @@ int Chessboard::getWinCondition(int player) const {
 
 // ── 棋子动画 ──
 void Chessboard::startDestroyAnim(int row, int col) {
+    // 将旧粉碎碎片移到衰减缓冲区（聚合碎片直接清除）
+    for (auto& f : activeFragments)
+        if (f.alpha > 0.f) decayFragments.push_back(f);
+    if (!activeFragments.empty()) decayColor = pieceAnimFrom;
+    activeFragments.clear();
+    convertFragments.clear();
+
     animRow = row; animCol = col;
     pieceAnimType = 1;
     pieceAnimFrom = grid[row][col];
     pieceAnimJustDone = false;
     pieceAnimClock.restart();
+    fragLastElapsed = 0.f;
+    // 从缓存复制碎片并重置运行时状态
+    const auto& cache = (pieceAnimFrom == 1) ? blackFragments : whiteFragments;
+    activeFragments = cache; // 复制整个布局
+    float px, py;
+    getGridPosition(row, col, px, py);
+    for (auto& frag : activeFragments) {
+        frag.pos = {px, py};
+        // 随机物理参数
+        frag.vel = {(rand() % 200 - 100) * 1.f, -(rand() % 200 + 100) * 1.f}; // vx±100, vy -100~-300
+        frag.rotSpeed = (rand() % 720 - 360) * 1.f; // -360~360 度/秒
+        frag.alpha = 255.f;
+        frag.rotation = 0.f;
+        frag.released = false;
+        frag.fadeTimer = 0.f;
+    }
 }
 
 void Chessboard::startConvertAnim(int row, int col, int fromColor, int toColor) {
@@ -608,6 +982,36 @@ void Chessboard::startConvertAnim(int row, int col, int fromColor, int toColor) 
     pieceAnimTo   = toColor;
     pieceAnimJustDone = false;
     pieceAnimClock.restart();
+    fragLastElapsed = 0.f;
+    convFragLastElapsed = 0.f;
+
+    // ── 粉碎方（旧色）──
+    const auto& cacheFrom = (fromColor == 1) ? blackFragments : whiteFragments;
+    activeFragments = cacheFrom;
+    for (auto& frag : activeFragments) {
+        frag.released = false;
+        frag.alpha = 255.f;
+        frag.rotation = 0.f;
+        frag.fadeTimer = 0.f;
+        frag.vel = {(rand() % 200 - 100) * 1.f, -(rand() % 200 + 100) * 1.f};
+        frag.rotSpeed = (rand() % 720 - 360) * 1.f;
+    }
+
+    // ── 聚合方（新色）──
+    const auto& cacheTo = (toColor == 1) ? blackFragments : whiteFragments;
+    convertFragments = cacheTo;
+    float px, py;
+    getGridPosition(row, col, px, py);
+    for (auto& frag : convertFragments) {
+        frag.released = false;
+        frag.alpha = 0.f;
+        frag.rotation = (rand() % 60 - 30) * 1.f; // 初始小角度旋转
+        frag.assembleTimer = 0.f;
+        frag.fadeTimer = 0.f;
+        // 散落起始位置（格子下方随机）
+        frag.pos.x = px + (rand() % 120 - 60) * 1.f;
+        frag.pos.y = py + (rand() % 100 + 40) * 1.f;
+    }
 }
 
 bool Chessboard::isPieceAnimating() const {
@@ -625,9 +1029,16 @@ bool Chessboard::updatePieceAnim() {
 }
 
 void Chessboard::finishPieceAnim() {
+    // 粉碎碎片移到衰减缓冲区（继续下落淡出）
+    for (auto& f : activeFragments)
+        if (f.alpha > 0.f) decayFragments.push_back(f);
+    if (!activeFragments.empty()) decayColor = pieceAnimFrom;
+    // 聚合碎片不衰减——动画结束时已在目标位置，直接清除
+    activeFragments.clear();
+    convertFragments.clear();
     pieceAnimType = 0;
-    animRow = animCol = -1;
     pieceAnimJustDone = false;
+    animRow = animCol = -1;
 }
 
 // ===== 落子抛物线动画 =====
