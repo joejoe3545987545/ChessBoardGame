@@ -16,6 +16,8 @@ void DeckManager::initDeck() {
     deck.push_back({7, L"隔离", L"使患病棋子在三回\n合后痊愈", CardEffect::QUARANTINE, 4});
     // 紫卡：盲目（cardColor=1, value=4 → 三回合后消退）
     deck.push_back({8, L"盲目", L"持有者将无法辨清\n自己的手牌\n三回合后消退\n且三子连星将导致\n消退时间延后", CardEffect::BLIND, 4, 1});
+    // 紫卡：以地事秦（cardColor=1, value=3 → 三回合后消退）
+    deck.push_back({9, L"以地事秦", L"持有者需要传送一\n张橙卡给出牌者\n不送牌则接下来三\n回合只能下棋\n送卡或撑过三回合\n后本牌消退", CardEffect::YIDISHIQIN, 3, 1});
 }
 
 void DeckManager::playCard(int index, Chessboard& board) {

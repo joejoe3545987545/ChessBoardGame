@@ -14,7 +14,8 @@ enum class CardEffect {
     EXTRA_TURN,         // 额外回合
     PLAGUE,             // 疫病：感染敌方棋子，每回合概率销毁+传播
     QUARANTINE,         // 隔离：三回合后清除所有疫病标记
-    BLIND               // 盲目：持有者手牌描述乱码/AI无法辨识，2回合后移除
+    BLIND,              // 盲目：持有者手牌描述乱码/AI无法辨识，2回合后移除
+    YIDISHIQIN          // 以地事秦：持有者需传一张橙卡回去，否则三回合不能出牌
 };
 
 struct Card {

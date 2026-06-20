@@ -405,7 +405,8 @@ void GameEngine::pipAnimStart(int animIdx) {
     pipAnimClock.restart();
     pipFadeAlpha = 0.f;
     pipFadeClock.restart();
-    pipTotalDur = (animIdx == 1) ? 7.f : 10.f;  // 默认每个动画的时长
+    pipFragsInit = false; pipShowFragsInit = false; pipDecayFrags.clear();
+    pipTotalDur = (animIdx == 1) ? 7.f : 10.f;
 }
 
 // 全屏切换
@@ -529,14 +530,13 @@ void GameEngine::processEvents() {
                         isGameOver = false;
                         savedThisGame = false;
                         isPaused = false;
-                        playerInvincible = false;
-                        playerInvinciblePlus = false;
+                        playerInvincible = false; playerInvinciblePlus = false; aiOnlyDrop = false; aiOnlyCard = false;
                         showAIDebug = false;
                         isSelectingPiece = false;
                         selectPieceStep = 0;
                         pendingDestroys.clear();
                         isBulkDestroying = false;
-                        isReturningHandToDeck = false; returnDeckInit = false; returnDeckFrags.clear(); returnDeckPos.clear(); returnDeckTex.clear(); curseRemoving = false; curseRemovingIdx = -1; curseRemoveFrags.clear(); curseRemoveFragsInit = false; cardDecayFrags.clear(); cardDecayTex = 0; cardBirthActive = false; cardBirthFrags.clear(); cardBirthInit = false; showcaseFragsInit = false; showcaseFrags.clear();
+                        isReturningHandToDeck = false; returnDeckInit = false; returnDeckFrags.clear(); returnDeckPos.clear(); returnDeckTex.clear(); curseRemoving = false; curseRemovingIdx = -1; curseRemoveFrags.clear(); curseRemoveFragsInit = false; cardDecayFrags.clear(); cardDecayTex = 0; cardBirthActive = false; cardBirthFrags.clear(); cardBirthInit = false; showcaseFragsInit = false; showcaseFrags.clear(); yiDiShiQinActive = false; yiDiShiQinResponded = false; yiDiShiQinPenalizing = false; yiDiShiQinPenalty = 0;
                         isCardAttachedToMouse = false;
                         attachedCardIndex = -1;
                         handSlotAssign.clear();
@@ -749,7 +749,7 @@ void GameEngine::handleMenuClick(sf::Vector2i mousePos) {
             selectPieceStep  = 0;
             pendingDestroys.clear();
             isBulkDestroying = false;
-            isReturningHandToDeck = false; returnDeckInit = false; returnDeckFrags.clear(); returnDeckPos.clear(); returnDeckTex.clear(); curseRemoving = false; curseRemovingIdx = -1; curseRemoveFrags.clear(); curseRemoveFragsInit = false; cardDecayFrags.clear(); cardDecayTex = 0; cardBirthActive = false; cardBirthFrags.clear(); cardBirthInit = false; showcaseFragsInit = false; showcaseFrags.clear();
+            isReturningHandToDeck = false; returnDeckInit = false; returnDeckFrags.clear(); returnDeckPos.clear(); returnDeckTex.clear(); curseRemoving = false; curseRemovingIdx = -1; curseRemoveFrags.clear(); curseRemoveFragsInit = false; cardDecayFrags.clear(); cardDecayTex = 0; cardBirthActive = false; cardBirthFrags.clear(); cardBirthInit = false; showcaseFragsInit = false; showcaseFrags.clear(); yiDiShiQinActive = false; yiDiShiQinResponded = false; yiDiShiQinPenalizing = false; yiDiShiQinPenalty = 0;
             newCardJustDrawn = false;
             showcaseState = CardShowcaseState::NONE;
             annihilateState = CardAnnihilateState::NONE;
@@ -817,7 +817,7 @@ void GameEngine::handlePVEConfigClick(sf::Vector2i mousePos) {
             selectPieceStep  = 0;
             pendingDestroys.clear();
             isBulkDestroying = false;
-            isReturningHandToDeck = false; returnDeckInit = false; returnDeckFrags.clear(); returnDeckPos.clear(); returnDeckTex.clear(); curseRemoving = false; curseRemovingIdx = -1; curseRemoveFrags.clear(); curseRemoveFragsInit = false; cardDecayFrags.clear(); cardDecayTex = 0; cardBirthActive = false; cardBirthFrags.clear(); cardBirthInit = false; showcaseFragsInit = false; showcaseFrags.clear();
+            isReturningHandToDeck = false; returnDeckInit = false; returnDeckFrags.clear(); returnDeckPos.clear(); returnDeckTex.clear(); curseRemoving = false; curseRemovingIdx = -1; curseRemoveFrags.clear(); curseRemoveFragsInit = false; cardDecayFrags.clear(); cardDecayTex = 0; cardBirthActive = false; cardBirthFrags.clear(); cardBirthInit = false; showcaseFragsInit = false; showcaseFrags.clear(); yiDiShiQinActive = false; yiDiShiQinResponded = false; yiDiShiQinPenalizing = false; yiDiShiQinPenalty = 0;
             newCardJustDrawn = false;
             showcaseState = CardShowcaseState::NONE;
             annihilateState = CardAnnihilateState::NONE;
@@ -875,7 +875,7 @@ bool GameEngine::handleHUDClick(sf::Vector2i mousePos) {
         }
 
         // 🔍 非吸附态拾取：先槽2后槽1，显式计算无lambda
-        if (!isCardAttachedToMouse && !cardBirthActive) {
+        if (!isCardAttachedToMouse && (!cardBirthActive || cardBirthClock.getElapsedTime().asSeconds() >= 1.0f)) {
             // ── 槽2顶卡 ──
             if (slot2Top >= 0) {
                 int stack2 = 0;
@@ -933,6 +933,20 @@ bool GameEngine::handleHUDClick(sf::Vector2i mousePos) {
                 bool isPurpleCard = (attachedCardIndex >= 0 && attachedCardIndex < static_cast<int>(playerDeck.hand.size()) &&
                                     playerDeck.hand[attachedCardIndex].cardColor == 1 &&
                                     !playerDeck.hand[attachedCardIndex].transferred); // 已传送的不可再传
+
+                // 🌟 以地事秦回应：拖橙卡到 Portal 或 Reader 都算送牌
+                bool isOrangeCard = (attachedCardIndex >= 0 && attachedCardIndex < (int)playerDeck.hand.size() &&
+                                     playerDeck.hand[attachedCardIndex].cardColor == 0);
+                if (yiDiShiQinActive && !yiDiShiQinResponded && isOrangeCard && pDist <= zoneRadius) {
+                    isCardAttachedToMouse = false;
+                    int sendIdx2 = attachedCardIndex;
+                    attachedCardIndex = -1;
+                    yiDiShiQinResponded = true;
+                    // 走紫卡传送动画
+                    startPurpleCardSend(sendIdx2);
+                    std::cout << "[以地事秦] 已传送橙卡回应！" << std::endl;
+                    return true;
+                }
 
                 if (isPurpleCard && pDist <= zoneRadius) {
                     if (!hasValidActionPoint(false)) {
@@ -1057,7 +1071,7 @@ void GameEngine::handlePauseMenuClick(sf::Vector2i mousePos) {
                 selectPieceStep = 0;
                 pendingDestroys.clear();
                 isBulkDestroying = false;
-                isReturningHandToDeck = false; returnDeckInit = false; returnDeckFrags.clear(); returnDeckPos.clear(); returnDeckTex.clear(); curseRemoving = false; curseRemovingIdx = -1; curseRemoveFrags.clear(); curseRemoveFragsInit = false; cardDecayFrags.clear(); cardDecayTex = 0; cardBirthActive = false; cardBirthFrags.clear(); cardBirthInit = false; showcaseFragsInit = false; showcaseFrags.clear();
+                isReturningHandToDeck = false; returnDeckInit = false; returnDeckFrags.clear(); returnDeckPos.clear(); returnDeckTex.clear(); curseRemoving = false; curseRemovingIdx = -1; curseRemoveFrags.clear(); curseRemoveFragsInit = false; cardDecayFrags.clear(); cardDecayTex = 0; cardBirthActive = false; cardBirthFrags.clear(); cardBirthInit = false; showcaseFragsInit = false; showcaseFrags.clear(); yiDiShiQinActive = false; yiDiShiQinResponded = false; yiDiShiQinPenalizing = false; yiDiShiQinPenalty = 0;
                 if (newCardSprite) newCardSprite->setPosition({2260.f, 160.f});
                 battleMusic.stop();
                 battleMusic.play();
@@ -1472,7 +1486,7 @@ void GameEngine::update() {
                 chessboard.startDestroyAnim(p.first, p.second);
             } else {
                 isBulkDestroying = false;
-            isReturningHandToDeck = false; returnDeckInit = false; returnDeckFrags.clear(); returnDeckPos.clear(); returnDeckTex.clear(); curseRemoving = false; curseRemovingIdx = -1; curseRemoveFrags.clear(); curseRemoveFragsInit = false; cardDecayFrags.clear(); cardDecayTex = 0; cardBirthActive = false; cardBirthFrags.clear(); cardBirthInit = false; showcaseFragsInit = false; showcaseFrags.clear();
+            isReturningHandToDeck = false; returnDeckInit = false; returnDeckFrags.clear(); returnDeckPos.clear(); returnDeckTex.clear(); curseRemoving = false; curseRemovingIdx = -1; curseRemoveFrags.clear(); curseRemoveFragsInit = false; cardDecayFrags.clear(); cardDecayTex = 0; cardBirthActive = false; cardBirthFrags.clear(); cardBirthInit = false; showcaseFragsInit = false; showcaseFrags.clear(); yiDiShiQinActive = false; yiDiShiQinResponded = false; yiDiShiQinPenalizing = false; yiDiShiQinPenalty = 0;
                 isBusyAnimating = false;
                 if (isTurnPaused) {
                     turnTimePaused += pauseClock.getElapsedTime().asSeconds();
@@ -1604,6 +1618,27 @@ void GameEngine::update() {
             aiPlayer = new AIPlayer(aiColor, aiDifficultySetting);
         }
 
+        // 🌟 AI 以地事秦回应：仅回合首次进入时判断（isAiThinking仍为false）
+        if (!isAiThinking && yiDiShiQinActive && !yiDiShiQinResponded && !yiDiShiQinPenalizing) {
+            std::vector<int> orangeIdxs;
+            for (size_t oi = 0; oi < playerDeck.aiHand.size(); ++oi)
+                if (playerDeck.aiHand[oi].cardColor == 0) orangeIdxs.push_back((int)oi);
+            if (!orangeIdxs.empty() && (rand() % 100) < 70) {
+                int pick = orangeIdxs[rand() % orangeIdxs.size()];
+                yiDiShiQinResponded = true;
+                Card sent = playerDeck.aiHand[pick];
+                playerDeck.aiHand.erase(playerDeck.aiHand.begin() + pick);
+                playerDeck.hand.push_back(sent);
+                handSlotAssign.push_back(1);
+                newCardJustDrawn = true; cardAnimClock.restart(); isAnimatingCard = true;
+                cardBirthActive = true; cardBirthClock.restart(); cardBirthInit = false;
+                std::cout << "[以地事秦] AI送出橙卡回应！" << std::endl;
+                consumeActionPoint(false);
+                settleActionPoints();
+                return;
+            }
+        }
+
         if (!isAiThinking) {
             isAiThinking = true;
             aiThinkClock.restart();
@@ -1620,16 +1655,19 @@ void GameEngine::update() {
 
         // ── 决策：先出牌再下棋？──
         bool hasCardAP = hasValidActionPoint(false);
-        bool shouldPlay = hasCardAP && !playerDeck.aiHand.empty();
-        if (shouldPlay && !aiBlindActive) {
+        bool shouldPlay = hasCardAP && !playerDeck.aiHand.empty() && !aiOnlyDrop;
+        if (aiOnlyCard) shouldPlay = hasCardAP && !playerDeck.aiHand.empty();
+        if (shouldPlay && !aiBlindActive && !aiOnlyCard) {
             shouldPlay = aiPlayer->shouldPlayCard(playerDeck.aiHand, chessboard, hasCardAP) &&
                          aiPlayer->shouldPlayBeforeDrop(playerDeck.aiHand, chessboard);
         } else if (shouldPlay && aiBlindActive) {
-            shouldPlay = (rand() % 100) < 40; // 盲目时 40% 概率出牌
+            shouldPlay = (rand() % 100) < 40;
         }
         if (shouldPlay) {
-            int idx = aiBlindActive ? (rand() % playerDeck.aiHand.size())
+            int idx = aiBlindActive ? (rand() % (int)playerDeck.aiHand.size())
                                     : aiPlayer->chooseCardToPlay(playerDeck.aiHand, chessboard);
+            if (aiOnlyCard && idx < 0 && !playerDeck.aiHand.empty())
+                idx = rand() % (int)playerDeck.aiHand.size(); // 强制出牌兜底
             if (idx >= 0 && idx < static_cast<int>(playerDeck.aiHand.size())) {
                 startAICardPlay(idx);
                 return;
@@ -1637,6 +1675,7 @@ void GameEngine::update() {
         }
 
         // ── AI 下棋 ──
+        if (aiOnlyCard && !playerDeck.aiHand.empty()) return; // 有手牌时跳过下棋
         auto move = aiPlayer->calculateBestMove(chessboard);
         int aiRow = move.first;
         int aiCol = move.second;
@@ -1688,14 +1727,17 @@ void GameEngine::update() {
 
             // ── 决策：下棋后出牌？──
             hasCardAP = hasValidActionPoint(false);
-            bool shouldPlayAfter = hasCardAP && !playerDeck.aiHand.empty();
-            if (shouldPlayAfter && !aiBlindActive)
+            bool shouldPlayAfter = hasCardAP && !playerDeck.aiHand.empty() && !aiOnlyDrop;
+            if (aiOnlyCard) shouldPlayAfter = hasCardAP && !playerDeck.aiHand.empty();
+            if (shouldPlayAfter && !aiBlindActive && !aiOnlyCard)
                 shouldPlayAfter = aiPlayer->shouldPlayCard(playerDeck.aiHand, chessboard, hasCardAP);
             else if (shouldPlayAfter && aiBlindActive)
                 shouldPlayAfter = (rand() % 100) < 40;
             if (shouldPlayAfter) {
-                int idx = aiBlindActive ? (rand() % playerDeck.aiHand.size())
+                int idx = aiBlindActive ? (rand() % (int)playerDeck.aiHand.size())
                                         : aiPlayer->chooseCardToPlay(playerDeck.aiHand, chessboard);
+                if (aiOnlyCard && idx < 0 && !playerDeck.aiHand.empty())
+                    idx = rand() % (int)playerDeck.aiHand.size();
                 if (idx >= 0 && idx < static_cast<int>(playerDeck.aiHand.size())) {
                     startAICardPlay(idx);
                     return;
@@ -1886,28 +1928,24 @@ void GameEngine::renderMenu() {
                 if (dt >= dur + 0.2f) { pipAnimState = 1; pipAnimClock.restart(); }
                 break;
             }
-            case 1: // INSERT
-                cardY = 200.f + (100.f - 200.f) * (dt / 0.7f);
-                if (dt >= 0.7f) { pipAnimState = 2; pipAnimClock.restart(); }
-                break;
-            case 2: { // ANNIHILATE → 边滑动边粉碎
+            case 1: { // INSERT + SHATTER：边插入读卡器边粉碎 (0.5s)
                 if (!pipFragsInit) {
                     pipFrags = cardFragCache; pipFragsTex = 0;
                     for (auto& frag : pipFrags) {
                         frag.released = false; frag.alpha = 255.f; frag.fadeTimer = 0.f;
                         frag.rotation = 0.f;
-                        frag.vel = {(rand()%200-100)*1.f, -(rand()%200+100)*1.f};
+                        frag.vel = {(rand()%160-80)*1.f, -(rand()%100+50)*1.f};
                         frag.rotSpeed = (rand()%720-360)*1.f;
                         frag.pos = {640.f, 200.f};
                     }
                     pipFragsInit = true; pipFragsLastT = 0.f;
                 }
-                float t = dt / 0.4f; if (t > 1.f) t = 1.f;
+                float t = dt / 0.8f; if (t > 1.f) t = 1.f;
                 float st = t * t * (3.f - 2.f * t);
-                float curY = 200.f + (100.f - 200.f) * st; // 边滑动
+                float curY = 200.f + (100.f - 200.f) * st;
                 cardY = 100.f;
                 float pipClipH = newCardTexture.getSize().y * (1.f - st);
-                float pipScale = cs * 2.5f;
+                float pipScale = cs;
                 int clipH = (int)pipClipH;
                 if (clipH > 0) {
                     newCardSprite->setScale({pipScale, pipScale});
@@ -1918,64 +1956,80 @@ void GameEngine::renderMenu() {
                     pipRT.draw(*newCardSprite);
                 }
                 float dtF = t - pipFragsLastT; pipFragsLastT = t;
-                if (dtF < 0.f) dtF = 0.f; if (dtF > 0.1f) dtF = 0.04f;
+                if (dtF < 0.f) dtF = 0.f; if (dtF > 0.1f) dtF = 0.08f;
                 for (auto& frag : pipFrags) {
                     if (!frag.released && (float)frag.texRect.position.y > pipClipH) {
                         frag.released = true;
-                        float fcx = frag.texRect.size.x/2.f, fcy = frag.texRect.size.y/2.f;
+                        float fcx=frag.texRect.size.x/2.f, fcy=frag.texRect.size.y/2.f;
                         sf::Vector2u ts = newCardTexture.getSize();
                         frag.pos.x = 640.f + (frag.texRect.position.x + fcx - ts.x/2.f) * pipScale;
                         frag.pos.y = curY + (frag.texRect.position.y + fcy - ts.y/2.f) * pipScale;
                     }
                     if (frag.released) {
-                        frag.vel.y += 800.f * dtF; frag.pos += frag.vel * dtF;
-                        frag.rotation += frag.rotSpeed * dtF;
-                        frag.fadeTimer += dtF; float fp = frag.fadeTimer/0.85f; if (fp>1.f) fp=1.f;
+                        frag.vel.y += 800.f*dtF; frag.pos += frag.vel*dtF;
+                        frag.rotation += frag.rotSpeed*dtF;
+                        frag.fadeTimer += dtF; float fp=frag.fadeTimer/0.85f; if(fp>1.f)fp=1.f;
                         frag.alpha = 255.f*(1.f-fp*fp*(3.f-2.f*fp));
                         float fcx=frag.texRect.size.x/2.f, fcy=frag.texRect.size.y/2.f;
                         newCardSprite->setOrigin({fcx,fcy}); newCardSprite->setTextureRect(frag.texRect);
                         newCardSprite->setPosition(frag.pos); newCardSprite->setRotation(sf::degrees(frag.rotation));
                         newCardSprite->setColor(sf::Color(255,255,255,(uint8_t)frag.alpha));
                         pipRT.draw(*newCardSprite);
-                        uint8_t g = (uint8_t)((1.f-fp)*100.f);
-                        if (g>0){newCardSprite->setColor(sf::Color(g,g,g,(uint8_t)frag.alpha));pipRT.draw(*newCardSprite, sf::BlendAdd);}
+                        uint8_t g=(uint8_t)((1.f-fp)*100.f);
+                        if(g>0){newCardSprite->setColor(sf::Color(g,g,g,(uint8_t)frag.alpha));pipRT.draw(*newCardSprite,sf::BlendAdd);}
                     }
                 }
                 newCardSprite->setOrigin({newCardTexture.getSize().x/2.f, newCardTexture.getSize().y/2.f});
+                // 文字逐行淡出：每行根据卡牌上的位置映射擦除阈值
+                {   auto txtFade = [&](float screenY) -> uint8_t {
+                        float texY = newCardTexture.getSize().y/2.f + (screenY - curY) / pipScale;
+                        float threshold = texY / newCardTexture.getSize().y;
+                        float clipFrac = 1.f - st; // 擦除线位置（1=完整, 0=全碎）
+                        if (threshold < clipFrac - 0.03f) return 255;
+                        if (threshold > clipFrac + 0.03f) return 0;
+                        return (uint8_t)(255.f * (clipFrac + 0.03f - threshold) / 0.06f);
+                    };
+                    uiText.setFont(cardFont);
+                    float scT = pipScale / 0.36f;
+                    uint8_t na = txtFade(curY - 164.f * scT);
+                    if (na > 0) { uiText.setCharacterSize((int)(36.f * scT)); uiText.setFillColor(sf::Color(255,255,255,na));
+                        uiText.setString(L"连击"); uiText.setPosition({640.f - 52.f * scT, curY - 164.f * scT}); pipRT.draw(uiText); }
+                    uint8_t da = txtFade(curY - 90.f * scT);
+                    if (da > 0) { uiText.setCharacterSize((int)(27.f * scT)); uiText.setFillColor(sf::Color(230,230,230,da));
+                        uiText.setString(L"给予两次落子数"); uiText.setPosition({640.f - 88.f * scT, curY - 90.f * scT}); pipRT.draw(uiText); }
+                    uiText.setFont(font);
+                }
                 showCard = false;
-                if (dt >= 0.4f) { pipAnimState = 3; pipAnimClock.restart(); pipFragsInit = false; }
+                if (dt >= 0.8f) {
+                    for (auto& f : pipFrags) pipDecayFrags.push_back(f);
+                    pipAnimState = 2; pipAnimClock.restart(); pipFragsInit = false;
+                }
                 break;
             }
-            case 3: // SHOW_PAUSE
+            case 2: // SHOW_PAUSE (0.3s)
                 showCard = false;
-                if (dt >= 0.3f) { pipAnimState = 4; pipAnimClock.restart(); }
+                if (dt >= 0.3f) { pipAnimState = 3; pipAnimClock.restart(); }
                 break;
-            case 4: { // SHOW_APPEAR → 碎片聚合
-                if (!pipFragsInit) {
-                    pipFrags = cardFragCache; pipFragsTex = 0;
-                    for (auto& frag : pipFrags) {
+            case 3: { // SHOW_APPEAR → 碎片聚合
+                if (!pipShowFragsInit) {
+                    std::cout << "[PIP Show] 初始化展示碎片" << std::endl;
+                    pipShowFrags = cardFragCache;
+                    for (auto& frag : pipShowFrags) {
                         frag.released = false; frag.alpha = 0.f; frag.fadeTimer = 0.f;
                         frag.rotation = (rand()%60-30)*1.f;
                         frag.pos.x = 640.f + (rand()%200-100)*1.f;
                         frag.pos.y = 650.f + (rand()%80)*1.f;
                     }
-                    pipFragsInit = true; pipFragsLastT = 0.f;
+                    pipShowFragsInit = true; pipFragsLastT = 0.f;
                 }
                 float t = dt / 1.2f; if (t > 1.f) t = 1.f;
                 float pipScale2 = cs * 2.5f;
                 float wipeY = newCardTexture.getSize().y * t;
                 int visH = (int)wipeY;
-                if (visH > 0) {
-                    newCardSprite->setScale({pipScale2, pipScale2});
-                    newCardSprite->setOrigin({newCardTexture.getSize().x/2.f, newCardTexture.getSize().y/2.f});
-                    newCardSprite->setTextureRect(sf::IntRect({0,0}, {(int)newCardTexture.getSize().x, visH}));
-                    newCardSprite->setPosition({640.f, 450.f});
-                    newCardSprite->setColor(sf::Color(255,255,255,255));
-                    pipRT.draw(*newCardSprite);
-                }
                 float dtF2 = t - pipFragsLastT; pipFragsLastT = t;
                 if (dtF2 < 0.f) dtF2 = 0.f; if (dtF2 > 0.1f) dtF2 = 0.04f;
-                for (auto& frag : pipFrags) {
+                newCardSprite->setScale({pipScale2, pipScale2});
+                for (auto& frag : pipShowFrags) {
                     float fcx = frag.texRect.size.x/2.f, fcy = frag.texRect.size.y/2.f;
                     sf::Vector2u ts2 = newCardTexture.getSize();
                     float tx = 640.f + (frag.texRect.position.x + fcx - ts2.x/2.f) * pipScale2;
@@ -1999,33 +2053,45 @@ void GameEngine::renderMenu() {
                     }
                 }
                 newCardSprite->setOrigin({newCardTexture.getSize().x/2.f, newCardTexture.getSize().y/2.f});
-                // 文字逐行淡入
-                {   float txtT = t;
-                    auto txtA = [&](float yOff) -> uint8_t {
-                        float th = newCardTexture.getSize().y * 0.5f - yOff / pipScale2;
-                        float lineT = th / newCardTexture.getSize().y;
-                        if (txtT < lineT) return 0;
-                        float f = (txtT - lineT) / 0.08f; if (f>1.f) f=1.f;
-                        return (uint8_t)(255.f*f);
+                newCardSprite->setTextureRect(sf::IntRect({0,0},{(int)newCardTexture.getSize().x,(int)newCardTexture.getSize().y}));
+                newCardSprite->setRotation(sf::degrees(0.f));
+                newCardSprite->setColor(sf::Color(255,255,255,255));
+                // 完整裁剪纹理盖在碎片上消除分割线
+                if (visH > 0) {
+                    newCardSprite->setScale({pipScale2, pipScale2});
+                    newCardSprite->setOrigin({newCardTexture.getSize().x/2.f, newCardTexture.getSize().y/2.f});
+                    newCardSprite->setTextureRect(sf::IntRect({0,0}, {(int)newCardTexture.getSize().x, visH}));
+                    newCardSprite->setPosition({640.f, 450.f});
+                    newCardSprite->setColor(sf::Color(255,255,255,255));
+                    pipRT.draw(*newCardSprite);
+                }
+                // 文字逐行淡入：每行根据卡牌上的位置映射擦除阈值
+                {   auto txtFadeIn = [&](float screenY) -> uint8_t {
+                        float texY = newCardTexture.getSize().y/2.f + (screenY - 450.f) / pipScale2;
+                        float threshold = texY / newCardTexture.getSize().y;
+                        if (t > threshold + 0.05f) return 255;
+                        if (t < threshold - 0.05f) return 0;
+                        return (uint8_t)(255.f * (t - threshold + 0.05f) / 0.1f);
                     };
                     uiText.setFont(cardFont);
-                    uint8_t na = txtA(164.f*2.5f);
-                    if (na>0) { uiText.setCharacterSize((int)(36.f*pipScale2/0.36f)); uiText.setFillColor(sf::Color(255,255,255,na));
-                        uiText.setString(L"连击"); uiText.setPosition({640.f-52.f*pipScale2/0.36f, 450.f-164.f*pipScale2/0.36f}); pipRT.draw(uiText); }
-                    uint8_t da = txtA(90.f*2.5f);
-                    if (da>0) { uiText.setCharacterSize((int)(27.f*pipScale2/0.36f)); uiText.setFillColor(sf::Color(230,230,230,da));
-                        uiText.setString(L"给予两次落子数"); uiText.setPosition({640.f-88.f*pipScale2/0.36f, 450.f-90.f*pipScale2/0.36f}); pipRT.draw(uiText); }
+                    float scS = pipScale2 / 0.36f;
+                    uint8_t na = txtFadeIn(450.f - 164.f * scS);
+                    if (na>0) { uiText.setCharacterSize((int)(36.f*scS)); uiText.setFillColor(sf::Color(255,255,255,na));
+                        uiText.setString(L"连击"); uiText.setPosition({640.f-52.f*scS, 450.f-164.f*scS}); pipRT.draw(uiText); }
+                    uint8_t da = txtFadeIn(450.f - 90.f * scS);
+                    if (da>0) { uiText.setCharacterSize((int)(27.f*scS)); uiText.setFillColor(sf::Color(230,230,230,da));
+                        uiText.setString(L"给予两次落子数"); uiText.setPosition({640.f-88.f*scS, 450.f-90.f*scS}); pipRT.draw(uiText); }
                     uiText.setFont(font);
                 }
                 showCard = false;
-                if (dt >= 1.2f) { pipAnimState = 5; pipAnimClock.restart(); pipFragsInit = false; }
+                if (dt >= 1.2f) { pipAnimState = 4; pipAnimClock.restart(); pipShowFragsInit = false; }
                 break;
             }
-            case 5: // SHOW_DISPLAY → 卡片定型
+            case 4: // SHOW_DISPLAY → 卡片定型
                 cardX = 640.f; cardY = 450.f; cardScale = cs * 2.5f;
-                if (dt >= 1.f) { pipAnimState = 6; pipAnimClock.restart(); }
+                if (dt >= 1.f) { pipAnimState = 5; pipAnimClock.restart(); }
                 break;
-            case 6: { // SHOW_FADE → 纯透明度淡化
+            case 5: { // SHOW_FADE → 纯透明度淡化
                 float t = dt / 0.5f; if (t > 1.f) t = 1.f;
                 cardX = 640.f; cardY = 450.f; cardScale = cs * 2.5f;
             cardAlpha = (uint8_t)(255 * (1.f - t));
@@ -2058,6 +2124,29 @@ void GameEngine::renderMenu() {
             uiText.setFont(font);
         }
         newCardSprite->setScale({0.36f, 0.36f});
+
+        // ── PIP 衰减碎片 ──
+        if (!pipDecayFrags.empty()) {
+            newCardSprite->setScale({cs, cs});
+            for (size_t di = 0; di < pipDecayFrags.size(); ) {
+                auto& frag = pipDecayFrags[di];
+                if (frag.alpha > 0.f) {
+                    frag.vel.y += 800.f * 0.016f; frag.pos += frag.vel * 0.016f;
+                    frag.fadeTimer += 0.016f; float fp = frag.fadeTimer/0.85f; if (fp>1.f)fp=1.f;
+                    frag.alpha = 255.f*(1.f-fp*fp*(3.f-2.f*fp));
+                }
+                if (frag.alpha <= 0.f) { pipDecayFrags.erase(pipDecayFrags.begin()+di); continue; }
+                float fcx=frag.texRect.size.x/2.f, fcy=frag.texRect.size.y/2.f;
+                newCardSprite->setOrigin({fcx,fcy}); newCardSprite->setTextureRect(frag.texRect);
+                newCardSprite->setPosition(frag.pos);
+                newCardSprite->setColor(sf::Color(255,255,255,(uint8_t)frag.alpha));
+                pipRT.draw(*newCardSprite);
+                ++di;
+            }
+            newCardSprite->setOrigin({newCardTexture.getSize().x/2.f, newCardTexture.getSize().y/2.f});
+            newCardSprite->setTextureRect(sf::IntRect({0,0},{(int)newCardTexture.getSize().x,(int)newCardTexture.getSize().y}));
+            newCardSprite->setColor(sf::Color(255,255,255,255));
+        }
 
         // ── 第 3 层：CardReader Top ──
         if (showReader) {
@@ -2320,10 +2409,9 @@ void GameEngine::renderMenu() {
     }
     // 悬停按钮抖动（20Hz, ±3px）
     float jx = 0.f, jy = 0.f;
-    if (hoverIdx >= 0 && menuJitterClock.getElapsedTime().asSeconds() >= 1.f / 60.f) {
+    if (hoverIdx >= 0) {
         jx = (static_cast<float>(rand()) / RAND_MAX * 2.f - 1.f);
         jy = (static_cast<float>(rand()) / RAND_MAX * 2.f - 1.f);
-        menuJitterClock.restart();
     }
     for (size_t i = 0; i < menuButtonBackgrounds.size(); ++i) {
         sf::Vector2f bpos = menuButtonBackgrounds[i].getPosition();
@@ -2438,7 +2526,7 @@ void GameEngine::renderMenu() {
         glitchRenderPos.y += (glitchCardPos.y - glitchRenderPos.y) * 0.45f;
 
         // 乱码文字刷新
-        const std::wstring pool = L"连击给两次数落子隐忍迫使敌为胜途方承六星受笼络销毁己一个棋转化破釜沉舟将手牌放回库根据量疫病指定颗患上概率死亡试图传染给其他也风险隔离在后痊愈";
+        const std::wstring pool = L"连击给两次数落子隐忍迫使敌为胜途方承六星受笼络销毁己一个棋转化破釜沉舟将手牌放回库根据量疫病指定颗患上概率死亡试图传染给其他也风险隔离在后痊愈盲目以地事秦持有者需要传送张橙卡出不送牌则接下回合只能下撑过本消退";
         int poolSize = (int)pool.size();
         if (menuGlitchClock.getElapsedTime().asSeconds() >= 0.08f) {
             for (auto& c : glitchName) c = pool[rand() % poolSize];
@@ -2545,10 +2633,9 @@ void GameEngine::renderPVEConfig() {
             { hoverIdx = i; break; }
     }
     float jx = 0.f, jy = 0.f;
-    if (hoverIdx >= 0 && menuJitterClock.getElapsedTime().asSeconds() >= 1.f / 60.f) {
+    if (hoverIdx >= 0) {
         jx = (static_cast<float>(rand()) / RAND_MAX * 2.f - 1.f);
         jy = (static_cast<float>(rand()) / RAND_MAX * 2.f - 1.f);
-        menuJitterClock.restart();
     }
 
     // ── UI_Frame 按钮背景 ──
@@ -2717,6 +2804,8 @@ void GameEngine::updateAICardAnimation() {
                 isTurnPaused = false;
             }
             consumeActionPoint(false);
+            triggerBattleMusic02();
+            addCrisisTime(30.f);
             settleActionPoints();
             std::cout << "[AI] 紫卡传送完成" << std::endl;
         }
@@ -2734,6 +2823,9 @@ void GameEngine::startPurpleCardSend(int handIndex) {
     purpleSendIndex = handIndex;
     purpleSendPos = newCardSprite->getPosition(); // 从当前释放位置出发
     isBusyAnimating = true;
+    cardBirthActive = false; isAnimatingCard = false;
+    showcaseState = CardShowcaseState::NONE; // 终止任何展示
+    annihilateState = CardAnnihilateState::NONE; // 终止任何湮灭
     if (!isTurnPaused) { isTurnPaused = true; pauseClock.restart(); }
     std::cout << "[PurpleSend] 紫卡传送启动" << std::endl;
 }
@@ -2784,10 +2876,13 @@ void GameEngine::updatePurpleCardSend() {
                 handSlotAssign.erase(handSlotAssign.begin() + purpleSendIndex);
                 playerDeck.aiHand.push_back(sentCard);
                 std::cout << "[PurpleSend] 紫卡已传送给敌方（已标记）" << std::endl;
+                triggerBattleMusic02();
+                addCrisisTime(30.f);
             }
             purpleSendState = PurpleSendState::IDLE;
             purpleSendIndex = -1;
             isBusyAnimating = false;
+            cardBirthActive = false; isAnimatingCard = false; // 终止出生动画防后续异常
             if (isTurnPaused) {
                 turnTimePaused += pauseClock.getElapsedTime().asSeconds();
                 isTurnPaused = false;
@@ -2803,7 +2898,7 @@ void GameEngine::updatePurpleCardSend() {
 
 void GameEngine::renderGameplay() {
     // ── 盲目效果：乱码文字池 ──
-    const std::wstring blindPool = L"连击给两次数落子隐忍迫使敌为胜途方承六星受笼络销毁己一个棋转化破釜沉舟将手牌放回库根据量疫病指定颗患上概率死亡试图传染给其他也风险隔离在后痊愈盲目";
+    const std::wstring blindPool = L"连击给两次数落子隐忍迫使敌为胜途方承六星受笼络销毁己一个棋转化破釜沉舟将手牌放回库根据量疫病指定颗患上概率死亡试图传染给其他也风险隔离在后痊愈盲目以地事秦持有者需要传送张橙卡出不送牌则接下回合只能下撑过本消退";
     auto scrambleText = [&](const std::wstring& src) {
         std::wstring out = src;
         for (auto& ch : out) if (ch != L'\n') ch = blindPool[rand() % blindPool.size()];
@@ -2967,14 +3062,17 @@ void GameEngine::renderGameplay() {
     }
 
     // ── 紫卡传送动画（Bottom 之上、Top 之下）──
-    if (purpleSendState != PurpleSendState::IDLE && purpleCardSprite &&
+    if (purpleSendState != PurpleSendState::IDLE &&
         purpleSendIndex >= 0 && purpleSendIndex < static_cast<int>(playerDeck.hand.size())) {
-        sf::Vector2u ts = purpleCardTexture.getSize();
-        purpleCardSprite->setScale({0.36f, 0.36f});
-        purpleCardSprite->setPosition(purpleSendPos);
-        purpleCardSprite->setTextureRect(sf::IntRect({0,0}, {(int)ts.x, (int)ts.y}));
-        purpleCardSprite->setColor(sf::Color(255, 255, 255, 255));
-        window.draw(*purpleCardSprite);
+        bool isP = (playerDeck.hand[purpleSendIndex].cardColor == 1);
+        sf::Sprite* psSpr = (isP && purpleCardSprite) ? purpleCardSprite : newCardSprite;
+        sf::Texture& psTex = (isP && purpleCardSprite) ? purpleCardTexture : newCardTexture;
+        sf::Vector2u ts = psTex.getSize();
+        psSpr->setScale({0.36f, 0.36f});
+        psSpr->setPosition(purpleSendPos);
+        psSpr->setTextureRect(sf::IntRect({0,0}, {(int)ts.x, (int)ts.y}));
+        psSpr->setColor(sf::Color(255, 255, 255, 255));
+        window.draw(*psSpr);
         const auto& pc = playerDeck.hand[purpleSendIndex];
         uiText.setFont(cardFont);
         uiText.setCharacterSize(28);
@@ -3417,6 +3515,36 @@ void GameEngine::renderGameplay() {
                                 sp->setTextureRect(sf::IntRect({0, 0}, {(int)ts.x, (int)ts.y}));
                                 sp->setRotation(sf::degrees(0.f));
                                 sp->setColor(sf::Color(255, 255, 255, 255));
+                                // 文字逐行淡出
+                                if (attachedCardIndex >= 0 && attachedCardIndex < (int)playerDeck.hand.size()) {
+                                    const auto& sc2 = playerDeck.hand[attachedCardIndex];
+                                    auto txtFade2 = [&](float screenY) -> uint8_t {
+                                        float texY = ts.y/2.f + (screenY - pos.y) / 0.36f;
+                                        float clipFrac = 1.f - t;
+                                        float th = texY / ts.y;
+                                        if (th < clipFrac - 0.02f) return 255;
+                                        if (th > clipFrac + 0.02f) return 0;
+                                        return (uint8_t)(255.f * (clipFrac + 0.02f - th) / 0.04f);
+                                    };
+                                    uiText.setFont(cardFont);
+                                    uint8_t na2 = txtFade2(pos.y - 164.f);
+                                    if (na2 > 0) { uiText.setCharacterSize(28); uiText.setFillColor(sf::Color(255,255,255,na2));
+                                        uiText.setString(playerBlindActive ? scrambleText(sc2.name) : sc2.name);
+                                        uiText.setPosition(sf::Vector2f(pos.x-52.f, pos.y-164.f)); window.draw(uiText); }
+                                    std::wstring desc2 = sc2.description;
+                                    size_t dp2 = 0; int dl2 = 0;
+                                    while (dp2 <= desc2.size()) {
+                                        size_t nl2 = desc2.find(L'\n', dp2);
+                                        if (nl2 == std::wstring::npos) nl2 = desc2.size();
+                                        float sy2 = pos.y - 90.f + dl2 * 26.f;
+                                        uint8_t da2 = txtFade2(sy2);
+                                        if (da2 > 0) { uiText.setCharacterSize(22); uiText.setFillColor(sf::Color(230,230,230,da2));
+                                            uiText.setString(sf::String(desc2.substr(dp2, nl2-dp2)));
+                                            uiText.setPosition(sf::Vector2f(pos.x-88.f, sy2)); window.draw(uiText); }
+                                        dp2 = nl2+1; dl2++;
+                                    }
+                                    uiText.setFont(font);
+                                }
                             }
                             cardAlreadyRendered = true;
 
@@ -3725,6 +3853,7 @@ void GameEngine::renderGameplay() {
                     spB->setTextureRect(sf::IntRect({0, 0}, {(int)tsB.x, (int)tsB.y}));
                     spB->setRotation(sf::degrees(0.f));
                     spB->setColor(sf::Color(255, 255, 255, 255));
+                    spB->setPosition(cardPos);
                     // 文字逐行：扫描线扫到时 0.1s 淡入
                     if (!playerDeck.hand.empty()) {
                         const auto& sc = playerDeck.hand[activeIdx];
@@ -3764,7 +3893,7 @@ void GameEngine::renderGameplay() {
                     }
                 }
                 cardAlreadyRendered = true;
-                if (rawT >= 1.f) { cardBirthActive = false; isAnimatingCard = false; }
+                if (rawT >= 0.667f) { cardBirthActive = false; isAnimatingCard = false; }
                 } else {
                 // 🌟 动效一：连续插值替代固定50段量化，消除帧率拍频闪烁
                 float currentHeightPercent = animTime / 1.0f;  // 0.0 → 1.0 连续增长
@@ -3785,7 +3914,7 @@ void GameEngine::renderGameplay() {
                 newCardSprite->setTextureRect(sf::IntRect({0, 0}, {static_cast<int>(texSize.x), currentRectHeight}));
 
                 // 🌟 动效二：【1.5秒纯白褪去变原色】（湮灭期间跳过）
-                if (animTime <= 1.5f && annihilateState == CardAnnihilateState::NONE) {
+                if (animTime <= 1.5f && annihilateState == CardAnnihilateState::NONE && isAnimatingCard) {
                     float whiteProgress = 1.0f - (animTime / 1.5f);
                     if (whiteProgress < 0.f) whiteProgress = 0.f;
 
@@ -4258,6 +4387,7 @@ void GameEngine::renderGameplay() {
             {6, L"疫病", L"指定一颗敌方棋子\n使其患上疫病\n患病棋子每回合都\n有概率死亡并试图\n传染给其他棋子\n玩家棋子也有患病\n风险", CardEffect::PLAGUE, 0, 0},
             {7, L"隔离", L"使患病棋子在三回\n合后痊愈", CardEffect::QUARANTINE, 4, 0},
             {8, L"盲目", L"持有者将无法辨清\n自己的手牌\n三回合后消退\n且三子连星将导致\n消退时间延后", CardEffect::BLIND, 4, 1},
+            {9, L"以地事秦", L"持有者需要传送一\n张橙卡给出牌者\n不送牌则接下来三\n回合只能下棋\n送卡或撑过三回合\n后本牌消退", CardEffect::YIDISHIQIN, 3, 1},
         };
         const int tmplCount = sizeof(cardTemplates) / sizeof(cardTemplates[0]);
         float sec2Y = dbgY + sec1H + 6.f;
@@ -4367,10 +4497,54 @@ void GameEngine::renderGameplay() {
         window.draw(uiText);
         sf::FloatRect invPlusRect({dbgX, sec6Y}, {dbgW, sec6H});
 
+        // === 区域 7：AI 只会下棋 ===
+        float sec7Y = sec6Y + sec6H + 6.f;
+        float sec7H = lineH + padY * 2;
+        sf::RectangleShape bg7({dbgW, sec7H});
+        bg7.setPosition({dbgX, sec7Y});
+        bg7.setFillColor(aiOnlyDrop ? sf::Color(20, 60, 20, 220) : sf::Color(20, 20, 20, 200));
+        bg7.setOutlineColor(aiOnlyDrop ? sf::Color(100, 255, 100, 200) : sf::Color(120, 120, 120, 150));
+        bg7.setOutlineThickness(1.f);
+        window.draw(bg7);
+        uiText.setCharacterSize(18);
+        uiText.setFillColor(aiOnlyDrop ? sf::Color(100, 255, 100) : sf::Color(200, 200, 200));
+        uiText.setString(sf::String(aiOnlyDrop ? L"[只会下棋: ON] 点击关闭" : L"[只会下棋: OFF] 点击开启"));
+        uiText.setPosition({dbgX + padX, sec7Y + padY});
+        window.draw(uiText);
+        sf::FloatRect onlyDropRect({dbgX, sec7Y}, {dbgW, sec7H});
+
+        // === 区域 8：AI 只会出牌 ===
+        float sec8Y = sec7Y + sec7H + 6.f;
+        float sec8H = lineH + padY * 2;
+        sf::RectangleShape bg8({dbgW, sec8H});
+        bg8.setPosition({dbgX, sec8Y});
+        bg8.setFillColor(aiOnlyCard ? sf::Color(60, 20, 20, 220) : sf::Color(20, 20, 20, 200));
+        bg8.setOutlineColor(aiOnlyCard ? sf::Color(255, 100, 100, 200) : sf::Color(120, 120, 120, 150));
+        bg8.setOutlineThickness(1.f);
+        window.draw(bg8);
+        uiText.setCharacterSize(18);
+        uiText.setFillColor(aiOnlyCard ? sf::Color(255, 100, 100) : sf::Color(200, 200, 200));
+        uiText.setString(sf::String(aiOnlyCard ? L"[只会出牌: ON] 点击关闭" : L"[只会出牌: OFF] 点击开启"));
+        uiText.setPosition({dbgX + padX, sec8Y + padY});
+        window.draw(uiText);
+        sf::FloatRect onlyCardRect({dbgX, sec8Y}, {dbgW, sec8H});
+
         // === 统一点击处理（防连点，放最后确保所有区域已声明）===
         if (mouseDown && !dbgClicked) {
             dbgClicked = true;
             bool done = false;
+            if (onlyCardRect.contains(dbgMpos) && !done) {
+                aiOnlyCard = !aiOnlyCard;
+                if (aiOnlyCard) aiOnlyDrop = false;
+                std::cout << "[Debug] AI只会出牌: " << (aiOnlyCard ? "ON" : "OFF") << std::endl;
+                done = true;
+            }
+            if (onlyDropRect.contains(dbgMpos) && !done) {
+                aiOnlyDrop = !aiOnlyDrop;
+                if (aiOnlyDrop) aiOnlyCard = false;
+                std::cout << "[Debug] AI只会下棋: " << (aiOnlyDrop ? "ON" : "OFF") << std::endl;
+                done = true;
+            }
             if (invPlusRect.contains(dbgMpos)) {
                 playerInvinciblePlus = !playerInvinciblePlus;
                 int aiC = (playerColorPref == 1) ? 2 : 1;
@@ -4472,12 +4646,11 @@ void GameEngine::renderGameplay() {
                 { hoverIdx = i; break; }
         }
 
-        // 悬停抖动（60Hz, ±1px）
+        // 悬停抖动（60Hz, ±2px）
         float jx = 0.f, jy = 0.f;
-        if (hoverIdx >= 0 && menuJitterClock.getElapsedTime().asSeconds() >= 1.f / 60.f) {
+        if (hoverIdx >= 0) {
             jx = (static_cast<float>(rand()) / RAND_MAX * 2.f - 1.f);
             jy = (static_cast<float>(rand()) / RAND_MAX * 2.f - 1.f);
-            menuJitterClock.restart();
         }
 
         float ffw = static_cast<float>(uiFrameTex.getSize().x);
@@ -4655,10 +4828,9 @@ void GameEngine::renderSettings() {
             { hoverIdx = i; break; }
     }
     float jx = 0.f, jy = 0.f;
-    if (hoverIdx >= 0 && menuJitterClock.getElapsedTime().asSeconds() >= 1.f / 60.f) {
+    if (hoverIdx >= 0) {
         jx = (static_cast<float>(rand()) / RAND_MAX * 2.f - 1.f);
         jy = (static_cast<float>(rand()) / RAND_MAX * 2.f - 1.f);
-        menuJitterClock.restart();
     }
 
     // ── UI_Frame 按钮背景 ──
@@ -4956,6 +5128,8 @@ void GameEngine::initActionPointsForTurn() {
 
 // 2. 行动合法性检查
 bool GameEngine::hasValidActionPoint(bool isPieceDrop) const {
+    // 以地事秦禁出牌
+    if (!isPieceDrop && yiDiShiQinPenalty > 0) return false;
     for (const auto& ap : currentTurnActionPoints) {
         if (isPieceDrop && ap.canPieceDrop) return true;
         if (!isPieceDrop && ap.canPlayCard) return true;
@@ -5082,8 +5256,10 @@ void GameEngine::processInfection() {
 
     for (auto& p : currentInfected) {
         int r = p.first, c = p.second;
-        // 20% 概率销毁
-        if ((rand() % 100) < 20) {
+        // 敌方棋子10%概率销毁，我方棋子5%
+        int pieceColor = chessboard.getPiece(r, c);
+        int deathRate = (pieceColor == plagueOwner) ? 5 : 10;
+        if ((rand() % 100) < deathRate) {
             toDestroy.push_back({r, c});
             continue;
         }
@@ -5125,11 +5301,13 @@ void GameEngine::processInfection() {
 
 // ── 紫卡诅咒处理（盲目等）──
 void GameEngine::processPurpleCurses() {
-    // 只在持有者自己的回合减计数（一回合=该方行动结束）
     bool isPlayerTurn = (currentTurn == playerColorPref ||
                          currentState == GameState::GAME_PVP);
-    // PVP 时双方共用 playerDeck.hand，始终处理
-    // PVE 时只处理当前回合方的诅咒
+    // 惩罚倒计时（每回合开始时减一次）
+    if (yiDiShiQinPenalty > 0) {
+        yiDiShiQinPenalty--;
+        std::cout << "[以地事秦] 禁出牌剩余: " << yiDiShiQinPenalty << std::endl;
+    }
     if (isPlayerTurn || currentState == GameState::GAME_PVP) {
         for (size_t i = 0; i < playerDeck.hand.size(); ) {
             auto& c = playerDeck.hand[i];
@@ -5145,7 +5323,42 @@ void GameEngine::processPurpleCurses() {
                         std::cout << "[Blind] 玩家盲目到期，启动移除动画" << std::endl;
                     }
                     ++i;
-                    continue; // 跳过erase，动画结束后处理
+                    continue;
+                }
+            }
+            // 🌟 以地事秦
+            if (c.cardColor == 1 && c.transferred && c.effect == CardEffect::YIDISHIQIN) {
+                if (yiDiShiQinPenalizing) {
+                    // 惩罚期：紫卡保留，倒计时结束才移除
+                    if (yiDiShiQinPenalty <= 0) {
+                        if (!curseRemoving) {
+                            curseRemoving = true; curseRemovingIdx = (int)i;
+                            curseRemoveClock.restart(); curseRemoveFragsInit = false;
+                        }
+                        yiDiShiQinActive = false; yiDiShiQinPenalizing = false;
+                        std::cout << "[以地事秦] 惩罚结束，粉碎移除" << std::endl;
+                        ++i; continue;
+                    }
+                } else if (yiDiShiQinResponded) {
+                    // 已回应，粉碎移除
+                    if (!curseRemoving) {
+                        curseRemoving = true; curseRemovingIdx = (int)i;
+                        curseRemoveClock.restart(); curseRemoveFragsInit = false;
+                    }
+                    yiDiShiQinActive = false; yiDiShiQinResponded = false;
+                    std::cout << "[以地事秦] 已回应，粉碎移除" << std::endl;
+                    ++i; continue;
+                } else if (!yiDiShiQinActive) {
+                    // 首次检测：开启响应窗口
+                    yiDiShiQinActive = true;
+                    yiDiShiQinResponded = false;
+                    yiDiShiQinPenalty = 0;
+                    std::cout << "[以地事秦] 响应窗口开启" << std::endl;
+                } else {
+                    // 响应窗口结束，未送牌 → 启动惩罚，紫卡保留
+                    yiDiShiQinPenalizing = true;
+                    yiDiShiQinPenalty = 3;
+                    std::cout << "[以地事秦] 未回应，三回合禁出牌" << std::endl;
                 }
             }
             ++i;
@@ -5161,6 +5374,24 @@ void GameEngine::processPurpleCurses() {
                     playerDeck.aiHand.erase(playerDeck.aiHand.begin() + i);
                     std::cout << "[Blind] AI 盲目已移除" << std::endl;
                     continue;
+                }
+            }
+            // 🌟 AI 以地事秦（AI不会主动送牌回应，直接进惩罚）
+            if (c.cardColor == 1 && c.transferred && c.effect == CardEffect::YIDISHIQIN) {
+                if (yiDiShiQinPenalizing) {
+                    if (yiDiShiQinPenalty <= 0) {
+                        playerDeck.aiHand.erase(playerDeck.aiHand.begin() + i);
+                        yiDiShiQinActive = false; yiDiShiQinPenalizing = false;
+                        std::cout << "[以地事秦] AI惩罚结束，移除" << std::endl;
+                        continue;
+                    }
+                } else if (!yiDiShiQinActive) {
+                    yiDiShiQinActive = true; yiDiShiQinResponded = false;
+                    yiDiShiQinPenalty = 0;
+                    std::cout << "[以地事秦] AI响应窗口开启（AI不回应）" << std::endl;
+                } else {
+                    yiDiShiQinPenalizing = true; yiDiShiQinPenalty = 3;
+                    std::cout << "[以地事秦] AI未回应，三回合禁出牌" << std::endl;
                 }
             }
             ++i;

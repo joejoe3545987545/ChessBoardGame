@@ -81,9 +81,17 @@ private:
     bool showAIDebug = false;            // F10 开发者调试：AI 手牌
     bool playerInvincible = false;       // 调试：玩家无敌（AI 需 15 连）
     bool playerInvinciblePlus = false;   // 调试：无敌 Plus（双方均不可胜）
+    bool aiOnlyDrop = false;             // 调试：AI 只会下棋
+    bool aiOnlyCard = false;             // 调试：AI 只会出牌
     bool isPaused = false;               // 对局暂停（ESC 切换）
     sf::Clock pauseFadeClock;            // 暂停遮罩淡入计时
     bool isBusyAnimating = false;       // 🌟 卡牌动画期间锁定玩家操作和 AI
+    // 🌟 以地事秦状态
+    bool yiDiShiQinActive = false;       // 持有者需回应
+    bool yiDiShiQinResponded = false;    // 是否已送牌回应
+    bool yiDiShiQinPenalizing = false;   // 是否处于惩罚期（紫卡保留）
+    int  yiDiShiQinPenalty = 0;          // 剩余禁出牌回合数
+    int  yiDiShiQinSender = 0;           // 传送本牌者（1=黑 2=白）
 
     // 🌟 疫病系统
     bool infected[15][15] = {};          // 棋子疫病标记
@@ -131,6 +139,10 @@ private:
     bool pipFragsInit = false;
     int  pipFragsTex = 0;
     float pipFragsLastT = 0.f;
+    std::vector<Fragment> pipDecayFrags;
+    // 展示专用碎片（与 pipFrags 隔离）
+    std::vector<Fragment> pipShowFrags;
+    bool pipShowFragsInit = false;
     int pendingSacrificeDestroys = 0;   // 退牌动画完成后待销毁的敌方棋子数
     bool isCardAttachedToMouse = false; // 🌟 标记卡牌是否吸附在鼠标上
     sf::Vector2f cardMouseOffset = {0.f, 0.f};
