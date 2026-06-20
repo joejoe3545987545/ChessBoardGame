@@ -147,7 +147,7 @@
 - [x] SACRIFICE_HAND ✅
 - [x] PLAGUE ✅
 - [x] QUARANTINE ✅
-- [x] 具体紫卡效果（盲目 BLIND 已实现）
+- [x] 具体紫卡效果（盲目 BLIND ✅、以地事秦 YIDISHIQIN ✅）
 
 ### 阶段 2：AI 增强
 - [x] AI 移动检测 pattern 触发抽卡 ✅
