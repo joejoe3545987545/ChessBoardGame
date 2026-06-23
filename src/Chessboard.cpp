@@ -117,6 +117,7 @@ void Chessboard::reset() {
         for (int j = 0; j < 15; ++j) {
             grid[i][j] = 0;
             usedMask[i][j] = 0;
+            scoredWin[i][j] = false;
         }
     }
     clearWinLine();
@@ -374,7 +375,7 @@ bool Chessboard::checkWin(int row, int col) {
         int r = row + dy[i];
         int c = col + dx[i];
 
-        while (r >= 0 && r < 15 && c >= 0 && c < 15 && grid[r][c] == turn) {
+        while (r >= 0 && r < 15 && c >= 0 && c < 15 && grid[r][c] == turn && !scoredWin[r][c]) {
             count++;
             r += dy[i];
             c += dx[i];
@@ -383,7 +384,7 @@ bool Chessboard::checkWin(int row, int col) {
         r = row - dy[i];
         c = col - dx[i];
 
-        while (r >= 0 && r < 15 && c >= 0 && c < 15 && grid[r][c] == turn) {
+        while (r >= 0 && r < 15 && c >= 0 && c < 15 && grid[r][c] == turn && !scoredWin[r][c]) {
             count++;
             r -= dy[i];
             c -= dx[i];
@@ -417,7 +418,7 @@ void Chessboard::findWinLine(int row, int col) {
         int endR = row, endC = col;
 
         // 向正方向扫描
-        while (r >= 0 && r < 15 && c >= 0 && c < 15 && grid[r][c] == turn) {
+        while (r >= 0 && r < 15 && c >= 0 && c < 15 && grid[r][c] == turn && !scoredWin[r][c]) {
             count++;
             endR = r;
             endC = c;
@@ -430,7 +431,7 @@ void Chessboard::findWinLine(int row, int col) {
         c = col - dx[i];
         int startR = row, startC = col;
 
-        while (r >= 0 && r < 15 && c >= 0 && c < 15 && grid[r][c] == turn) {
+        while (r >= 0 && r < 15 && c >= 0 && c < 15 && grid[r][c] == turn && !scoredWin[r][c]) {
             count++;
             startR = r;
             startC = c;
@@ -468,6 +469,23 @@ void Chessboard::clearWinLine() {
     winStartCol = -1;
     winEndRow = -1;
     winEndCol = -1;
+}
+
+// ============================================================================
+// 🌟 【胜利制重构】沿胜利线标记已计分格子，阻断后续重复计分
+// ============================================================================
+void Chessboard::markWinCellsAsScored(int startRow, int startCol, int endRow, int endCol) {
+    int dr = (endRow > startRow) ? 1 : (endRow < startRow) ? -1 : 0;
+    int dc = (endCol > startCol) ? 1 : (endCol < startCol) ? -1 : 0;
+    int r = startRow, c = startCol;
+    while (true) {
+        if (r >= 0 && r < 15 && c >= 0 && c < 15)
+            scoredWin[r][c] = true;
+        if (r == endRow && c == endCol) break;
+        r += dr; c += dc;
+    }
+    std::cout << "[ScoredWin] 标记 (" << startRow << "," << startCol
+              << ") -> (" << endRow << "," << endCol << ") 为已计分" << std::endl;
 }
 
 // ============================================================================

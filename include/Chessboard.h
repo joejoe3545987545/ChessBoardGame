@@ -42,6 +42,7 @@ public:
     bool checkWin(int row, int col);
     void setWinCondition(int player, int cond);  // 设置某方胜利条件（默认 5）
     int  getWinCondition(int player) const;
+    void markWinCellsAsScored(int startRow, int startCol, int endRow, int endCol);
     void draw(sf::RenderTarget& target);
 
     // 将棋盘网格坐标转换为像素坐标（外部也可用）
@@ -70,6 +71,8 @@ public:
     bool isReplaying() const;
     void drawHoverRing(sf::RenderWindow& window, int currentTurn);
     void placeDirect(int row, int col, int player);
+    sf::Sprite& getBlackSprite() { return blackSprite; }
+    sf::Sprite& getWhiteSprite() { return whiteSprite; }
 
     // 棋子动画（销毁/转化，可复用）
     void startDestroyAnim(int row, int col);
@@ -87,6 +90,7 @@ public:
 private:
     int grid[15][15];
     int usedMask[15][15] = {};  // 每位对应一个方向: 0=H 1=V 2=↘ 3=↗
+    bool scoredWin[15][15] = {}; // 已被计分胜利格子，阻断后续5连扫描
 
     sf::Texture boardTexture;
     sf::Texture blackTexture;

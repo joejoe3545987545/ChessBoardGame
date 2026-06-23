@@ -128,8 +128,7 @@ GameEngine::GameEngine()
     uiText.setCharacterSize(36);
 
     timerText.setCharacterSize(44);
-    timerText.setStyle(sf::Text::Bold);
-    timerText.setFillColor(sf::Color(40, 120, 40));
+    timerText.setFillColor(sf::Color(255, 255, 255));
 
     // 🌟 顺手把这里重复调用的一句 initUI(); 删掉了，让代码更干净
 
@@ -284,6 +283,7 @@ GameEngine::GameEngine()
         menuBlackSpr.setTexture(menuBlackTex, true);
         menuBlackSpr.setOrigin({menuBlackTex.getSize().x / 2.f, menuBlackTex.getSize().y / 2.f});
     }
+    initFramePieceFragCache(); // HR纹理已加载，此时生成碎片缓存
 
     // 🌟 主菜单 UI 素材
     if (uiFrameTex.loadFromFile(getEngineAssetPath("assets/UI_Frame.png"))) {
@@ -310,6 +310,26 @@ GameEngine::GameEngine()
     if (ringTex.loadFromFile(getEngineAssetPath("assets/ring.png"))) {
         ringSpr.setTexture(ringTex, true);
         ringSpr.setOrigin({ringTex.getSize().x / 2.f, ringTex.getSize().y / 2.f});
+    }
+    if (watchTex.loadFromFile(getEngineAssetPath("assets/watch.png"))) {
+        watchSpr.setTexture(watchTex, true);
+        watchSpr.setOrigin({watchTex.getSize().x / 2.f, watchTex.getSize().y / 2.f});
+    }
+    if (blackHRTex.loadFromFile(getEngineAssetPath("assets/black_HR.png"))) {
+        blackHRSpr = new sf::Sprite(blackHRTex);
+        blackHRSpr->setOrigin({blackHRTex.getSize().x/2.f, blackHRTex.getSize().y/2.f});
+    }
+    if (chessFrameTex.loadFromFile(getEngineAssetPath("assets/ChessFrame.png"))) {
+        chessFrameSpr.setTexture(chessFrameTex, true);
+        chessFrameSpr.setOrigin({chessFrameTex.getSize().x / 2.f, chessFrameTex.getSize().y / 2.f});
+    }
+    // 数字图片计时器
+    for (int d = 0; d < 10; ++d) {
+        char buf[64]; snprintf(buf, sizeof(buf), "assets/Numbers/%d.png", d);
+        if (digitTex[d].loadFromFile(getEngineAssetPath(buf))) {
+            digitSpr[d] = new sf::Sprite(digitTex[d]);
+            digitSpr[d]->setOrigin({digitTex[d].getSize().x / 2.f, digitTex[d].getSize().y / 2.f});
+        }
     }
     // 🌟 画中画初始化
     pipRT.resize({1280u, 720u});
@@ -447,8 +467,18 @@ void GameEngine::applyViewport() {
 // ------------------------ 主循环 ------------------------
 void GameEngine::run() {
     window.setView(gameView);
+    GameState lastState = currentState;
     while (window.isOpen()) {
         processEvents();
+        if (currentState != lastState && !transitioning) {
+            nextState = currentState; currentState = lastState;
+            transitioning = true; transitionClock.restart();
+        }
+        if (transitioning) {
+            float t = transitionClock.getElapsedTime().asSeconds();
+            if (t >= 0.25f && currentState != nextState) { currentState = nextState; lastState = nextState; }
+            if (t >= 0.5f) transitioning = false;
+        } else { lastState = currentState; }
         update();
         render();
     }
@@ -528,6 +558,7 @@ void GameEngine::processEvents() {
                         currentTurn = 1;
                         isAiThinking = false;
                         isGameOver = false;
+                        playerFramePieces = 0; enemyFramePieces = 0; fpAnimState = FramePieceAnimState::IDLE; fpAnimFrags.clear(); pendingFramePieces.clear();
                         savedThisGame = false;
                         isPaused = false;
                         playerInvincible = false; playerInvinciblePlus = false; aiOnlyDrop = false; aiOnlyCard = false;
@@ -691,15 +722,17 @@ void GameEngine::processEvents() {
                         // 记录历史
                         chessboard.recordMove(lastRow, lastCol, currentTurn);
 
-                        // 检查胜利
-                        if (chessboard.checkWin(lastRow, lastCol)) {
-                            winReason = (currentTurn == 1) ? L"黑方达成五连，获得了胜利！" : L"白方达成五连，获得了胜利！";
-                            isGameOver = true;
-                            currentState = GameState::GAME_OVER;
-                            std::cout << "[Info] Player " << currentTurn << " wins." << std::endl;
-                        } 
-                        else {
-                            // 🌟【行动点核心替换点】：删掉你原先落子后强行换人和重置时钟的代码！
+                        // 🌟【胜利制重构】多方向5连检测，每方向放一个帧棋子
+                        for (int pass = 0; pass < 4; ++pass) {
+                            if (!chessboard.checkWin(lastRow, lastCol)) break;
+                            int sr, sc, er, ec;
+                            chessboard.getWinLine(sr, sc, er, ec);
+                            chessboard.markWinCellsAsScored(sr, sc, er, ec);
+                            awardFramePiece(currentTurn);
+                            chessboard.clearWinLine();
+                        }
+                        if (!isGameOver && !isBusyAnimating) {
+                            // 🌟【行动点核心替换点】：动画期间跳过AP结算，由completeFramePieceAnim处理
                             // 移交给我们的总体结算中心。结算中心会判断：点数清零了才换人刷新；点数未清零则锁死倒计时让玩家继续行动。
                             settleActionPoints();
 
@@ -761,6 +794,7 @@ void GameEngine::handleMenuClick(sf::Vector2i mousePos) {
             currentTurn = 1;
             isAiThinking = false;
             isGameOver = false;
+            playerFramePieces = 0; enemyFramePieces = 0; fpAnimState = FramePieceAnimState::IDLE; fpAnimFrags.clear(); pendingFramePieces.clear();
             savedThisGame = false;
             currentState = GameState::GAME_PVP;
             initActionPointsForTurn();
@@ -829,6 +863,7 @@ void GameEngine::handlePVEConfigClick(sf::Vector2i mousePos) {
             currentTurn = 1;
             isAiThinking = false;
             isGameOver = false;
+            playerFramePieces = 0; enemyFramePieces = 0; fpAnimState = FramePieceAnimState::IDLE; fpAnimFrags.clear(); pendingFramePieces.clear();
             savedThisGame = false;
             currentState = GameState::GAME_PVE;
             initActionPointsForTurn();
@@ -1087,6 +1122,7 @@ void GameEngine::handlePauseMenuClick(sf::Vector2i mousePos) {
                 showcaseState = CardShowcaseState::NONE;
                 isAiThinking = false;
                 isGameOver = false;
+                playerFramePieces = 0; enemyFramePieces = 0; fpAnimState = FramePieceAnimState::IDLE; fpAnimFrags.clear(); pendingFramePieces.clear();
                 savedThisGame = false;
                 isPaused = false; pauseFadeClock.restart();
                 turnClock.restart();
@@ -1378,6 +1414,13 @@ void GameEngine::update() {
                 isPlayerWon = true;
             }
         }
+        // 判定条件1b：🌟【胜利制重构】PVE 帧棋子获胜
+        else if (winReason == L"我方获胜") {
+            isPlayerWon = true;
+        }
+        else if (winReason == L"敌方获胜") {
+            isPlayerWon = false;
+        }
         // 判定条件2：如果文本里明确写了白方获胜，且玩家是执黑(1)的，说明玩家输了（被AI打败）
         else if (winReason.find(L"白方获胜") != std::wstring::npos && playerColorPref == 1) {
             isPlayerWon = false;
@@ -1539,11 +1582,16 @@ void GameEngine::update() {
             }
             consumeActionPoint(false);
             handled = true;
-            if (chessboard.checkWin(ar, ac)) {
-                winReason = (selectPiecePlayer == 1) ? L"黑方达成胜利连线，获得了胜利！" : L"白方达成胜利连线，获得了胜利！";
-                isGameOver = true;
-                currentState = GameState::GAME_OVER;
-            } else {
+            // 🌟【胜利制重构】多方向检测，每方向放一个帧棋子
+            for (int pass = 0; pass < 4; ++pass) {
+                if (!chessboard.checkWin(ar, ac)) break;
+                int sr, sc, er, ec;
+                chessboard.getWinLine(sr, sc, er, ec);
+                chessboard.markWinCellsAsScored(sr, sc, er, ec);
+                awardFramePiece(selectPiecePlayer);
+                chessboard.clearWinLine();
+            }
+            if (!isGameOver && !isBusyAnimating) {
                 settleActionPoints();
             }
             std::cout << "[Convert] 转化完成！" << std::endl;
@@ -1715,15 +1763,22 @@ void GameEngine::update() {
 
             // AI 四子连星不影响战斗音乐
 
-            // 胜利检测
-            if (chessboard.checkWin(aiRow, aiCol)) {
-                int aiColor = (playerColorPref == 1) ? 2 : 1;
-                winReason = (aiColor == 1) ? L"AI 计算完美，黑方获胜！" : L"AI 计算完美，白方获胜！";
-                isGameOver = true;
-                currentState = GameState::GAME_OVER;
+            // 🌟【胜利制重构】多方向5连检测，每方向放一个帧棋子
+            int aiColor = (playerColorPref == 1) ? 2 : 1;
+            for (int pass = 0; pass < 4; ++pass) {
+                if (!chessboard.checkWin(aiRow, aiCol)) break;
+                int sr, sc, er, ec;
+                chessboard.getWinLine(sr, sc, er, ec);
+                chessboard.markWinCellsAsScored(sr, sc, er, ec);
+                awardFramePiece(aiColor);
+                chessboard.clearWinLine();
+            }
+            if (isGameOver) {
                 std::cout << "[Info] AI wins at (" << aiRow << "," << aiCol << ")" << std::endl;
                 return;
             }
+            // 帧棋子动画播放中，暂停 AI 决策
+            if (isBusyAnimating) return;
 
             // ── 决策：下棋后出牌？──
             hasCardAP = hasValidActionPoint(false);
@@ -1839,6 +1894,18 @@ void GameEngine::render() {
             break;
         default:
             break;
+    }
+
+    // 🌟 界面切换过渡遮罩
+    if (transitioning) {
+        float t2 = transitionClock.getElapsedTime().asSeconds();
+        float alpha = (t2 < 0.25f) ? 255.f * (t2 / 0.25f) : 255.f * (1.f - (t2 - 0.25f) / 0.25f);
+        if (alpha > 0.f) {
+            sf::RectangleShape overlay({2560.f, 1440.f});
+            overlay.setPosition({0.f, 0.f});
+            overlay.setFillColor(sf::Color(0, 0, 0, (uint8_t)alpha));
+            window.draw(overlay);
+        }
     }
 
     window.display();
@@ -2741,18 +2808,26 @@ void GameEngine::updateAICardAnimation() {
         if (t >= 1.f) {
             aiCardPlayState = AICardPlayState::ANNIHILATING;
             aiCardPlayClock.restart();
+            // 初始化碎片
+            cardFragActive = (showcasedCard.cardColor == 1) ? cardFragCachePurple : cardFragCache;
+            cardShatterTex = showcasedCard.cardColor;
+            cardShatterLastT = 0.f;
+            for (auto& frag : cardFragActive) {
+                frag.released = false; frag.alpha = 255.f; frag.fadeTimer = 0.f;
+                frag.rotation = 0.f;
+                frag.vel = {(rand()%160-80)*1.f, -(rand()%100+50)*1.f};
+                frag.rotSpeed = (rand()%720-360)*1.f;
+            }
         }
         break;
     }
     case AICardPlayState::ANNIHILATING: {
-        // 滑入 CardReader (300,400) → (300,210) — 与人族 MOVE_TO_ZERO 同款（0.35s smoothstep）
-        float t = elapsed / 0.35f;
-        if (t > 1.f) t = 1.f;
-        float eased = t * t * (3.f - 2.f * t); // smoothstep
+        // 边上升边粉碎 (300,400)→(300,210)，0.5s
+        float t = elapsed / 0.5f; if (t > 1.f) t = 1.f;
+        float eased = t * t * (3.f - 2.f * t);
         aiCardAnimPos.x = 300.f;
         aiCardAnimPos.y = 400.f + (210.f - 400.f) * eased;
         if (t >= 1.f) {
-            // 进入展示阶段
             playerDeck.aiDiscardCard(aiPlayingCardIndex);
             aiPlayingCardIndex = -1;
             showcaseState = CardShowcaseState::PAUSE;
@@ -3037,6 +3112,47 @@ void GameEngine::renderGameplay() {
         }
     }
 
+    // ChessFrame 装饰框（棋盘之上、卡牌之下）
+    // 🌟【胜利制重构】初始无棋子，随5连达成逐步放置对应颜色棋子
+    if (chessFrameTex.getSize().x > 0) {
+        float cfs = 720.f / chessFrameTex.getSize().x;
+        chessFrameSpr.setScale({cfs, cfs});
+        chessFrameSpr.setPosition({1280.f, 80.f});
+        chessFrameSpr.setColor(sf::Color(255, 255, 255, 255));
+        window.draw(chessFrameSpr);
+        chessFrameSpr.setPosition({1280.f, 1360.f});
+        window.draw(chessFrameSpr);
+
+        // 确定上下框棋子颜色
+        int topColor, bottomColor;
+        if (currentState == GameState::GAME_PVE) {
+            topColor = playerColorPref;                   // 玩家颜色
+            bottomColor = (playerColorPref == 1) ? 2 : 1; // AI 颜色
+        } else { // GAME_PVP
+            topColor = 1;    // 黑方=上框
+            bottomColor = 2; // 白方=下框
+        }
+
+        auto drawFramePiece = [&](int color, float x, float y) {
+            sf::Sprite& sp = (color == 1) ? chessboard.getBlackSprite()
+                                          : chessboard.getWhiteSprite();
+            const sf::Texture& tex = sp.getTexture();
+            float s = 96.f / tex.getSize().x;
+            sp.setScale({s, s});
+            sp.setPosition({x, y});
+            sp.setColor(sf::Color::White);
+            window.draw(sp);
+        };
+
+        const float pxBase = 1005.f, pxSpacing = 138.f;
+        // 上框：playerFramePieces 个棋子（左→右）
+        for (int p = 0; p < playerFramePieces && p < 5; ++p)
+            drawFramePiece(topColor, pxBase + p * pxSpacing, 80.f);
+        // 下框：enemyFramePieces 个棋子（左→右）
+        for (int p = 0; p < enemyFramePieces && p < 5; ++p)
+            drawFramePiece(bottomColor, pxBase + p * pxSpacing, 1360.f);
+    }
+
     // 🌟【独立 UI 层：卡槽背景常驻】
     // 只要处于对局状态（PVP 或 PVE），卡槽就从一开始无条件永久渲染在右侧
     if (currentState == GameState::GAME_PVP || currentState == GameState::GAME_PVE) {
@@ -3059,6 +3175,34 @@ void GameEngine::renderGameplay() {
         if (cardPortalBottomSprite != nullptr) {
             window.draw(*cardPortalBottomSprite);
         }
+    }
+
+    // 2. 渲染计时器（watch + 数字，在传送动画和卡牌下层）
+    if (watchTex.getSize().x > 0) {
+        float ws = 480.f / watchTex.getSize().x;
+        watchSpr.setScale({ws, ws});
+        watchSpr.setPosition({234.f, 720.f});
+        watchSpr.setColor(sf::Color(255, 255, 255, 255));
+        window.draw(watchSpr);
+    }
+    int remainingTime = static_cast<int>(std::ceil(45.f - getEffectiveTurnTime()));
+    if (remainingTime < 0) remainingTime = 0;
+    if (remainingTime > 45) remainingTime = 45;
+    int tens = remainingTime / 10;
+    int ones = remainingTime % 10;
+    float digitScale = 48.f / digitTex[0].getSize().x;
+    float digitX = 285.f, digitY = 725.f, digitSpacing = 60.f;
+    if (digitSpr[tens] && digitTex[tens].getSize().x > 0) {
+        digitSpr[tens]->setScale({digitScale, digitScale});
+        digitSpr[tens]->setPosition({digitX, digitY});
+        digitSpr[tens]->setColor(sf::Color::White);
+        window.draw(*digitSpr[tens]);
+    }
+    if (digitSpr[ones] && digitTex[ones].getSize().x > 0) {
+        digitSpr[ones]->setScale({digitScale, digitScale});
+        digitSpr[ones]->setPosition({digitX + digitSpacing, digitY});
+        digitSpr[ones]->setColor(sf::Color::White);
+        window.draw(*digitSpr[ones]);
     }
 
     // ── 紫卡传送动画（Bottom 之上、Top 之下）──
@@ -3110,6 +3254,38 @@ void GameEngine::renderGameplay() {
             useSpr->setTextureRect(sf::IntRect({0,0}, {(int)ts.x, (int)ts.y}));
             useSpr->setColor(sf::Color(255, 255, 255, (uint8_t)(255 * alpha)));
             window.draw(*useSpr);
+        } else if (aiCardPlayState == AICardPlayState::ANNIHILATING && !aiCardIsPurpleTransfer) {
+            // 🌟 AI 卡牌边上升边粉碎
+            float t2 = aiCardPlayClock.getElapsedTime().asSeconds() / 0.5f;
+            if (t2 > 1.f) t2 = 1.f;
+            float eased2 = t2 * t2 * (3.f - 2.f * t2);
+            float curY2 = 400.f + (210.f - 400.f) * eased2;
+            sf::Sprite* spr = (cardShatterTex == 1 && purpleCardSprite) ? purpleCardSprite : newCardSprite;
+            sf::Texture& tx2 = (cardShatterTex == 1) ? purpleCardTexture : newCardTexture;
+            sf::Vector2u ts2 = tx2.getSize();
+            if (ts2.x > 0 && ts2.y > 0 && !cardFragActive.empty()) {
+                float clipH2 = ts2.y * (1.f - eased2);
+                spr->setScale({0.36f, 0.36f});
+                int clip = (int)clipH2;
+                if (clip > 0) { spr->setOrigin({ts2.x/2.f, ts2.y/2.f}); spr->setTextureRect({{0,0},{(int)ts2.x,clip}}); spr->setPosition({300.f, curY2}); spr->setColor({255,255,255,255}); window.draw(*spr); }
+                float dt2 = t2 - cardShatterLastT; cardShatterLastT = t2;
+                if (dt2 < 0.f) dt2 = 0.f; if (dt2 > 0.1f) dt2 = 0.05f;
+                for (auto& frag : cardFragActive) {
+                    if (!frag.released) { float ft2=(float)frag.texRect.position.y; if (ft2 > clipH2) { frag.released=true;
+                        float fcx=frag.texRect.size.x/2.f, fcy=frag.texRect.size.y/2.f;
+                        frag.pos.x=300.f+(frag.texRect.position.x+fcx-ts2.x/2.f)*0.36f;
+                        frag.pos.y=curY2+(frag.texRect.position.y+fcy-ts2.y/2.f)*0.36f;
+                    }}
+                    if (frag.released) { frag.vel.y+=800.f*dt2; frag.pos+=frag.vel*dt2; frag.rotation+=frag.rotSpeed*dt2; frag.fadeTimer+=dt2;
+                        float fp=frag.fadeTimer/0.85f; if(fp>1.f)fp=1.f; frag.alpha=255.f*(1.f-fp*fp*(3.f-2.f*fp));
+                        float fcx=frag.texRect.size.x/2.f, fcy=frag.texRect.size.y/2.f;
+                        spr->setOrigin({fcx,fcy}); spr->setTextureRect(frag.texRect); spr->setPosition(frag.pos);
+                        spr->setRotation(sf::degrees(frag.rotation)); spr->setColor(sf::Color(255,255,255,(uint8_t)frag.alpha)); window.draw(*spr);
+                        uint8_t g=(uint8_t)((1.f-fp)*100.f); if(g>0){spr->setColor(sf::Color(g,g,g,(uint8_t)frag.alpha));window.draw(*spr,sf::BlendAdd);}
+                    }
+                }
+                spr->setOrigin({ts2.x/2.f,ts2.y/2.f}); spr->setTextureRect({{0,0},{(int)ts2.x,(int)ts2.y}}); spr->setRotation(sf::degrees(0.f)); spr->setColor({255,255,255,255});
+            }
         } else {
             // ── 普通 AI 出牌 / 紫卡滑动：小卡沿路径移动 ──
             useSpr->setScale({0.36f, 0.36f});
@@ -4316,14 +4492,6 @@ void GameEngine::renderGameplay() {
         }
     }
 
-    // 2. 渲染计时器
-    int remainingTime = static_cast<int>(std::ceil(45.f - getEffectiveTurnTime()));
-    if (remainingTime < 0) remainingTime = 0;
-    timerText.setFillColor(remainingTime <= 10 ? sf::Color(220, 40, 40) : sf::Color(40, 120, 40));
-    timerText.setString(sf::String(L"剩余时间: " + std::to_wstring(remainingTime) + L" 秒"));
-    timerText.setPosition({900.f, 15.f});
-    window.draw(timerText);
-
     // ── 调试面板鼠标追踪（始终运行，避免 static 残留）──
     static bool dbgClicked = false;
     bool mouseDown = sf::Mouse::isButtonPressed(sf::Mouse::Button::Left);
@@ -4589,6 +4757,107 @@ void GameEngine::renderGameplay() {
         }
     }
 
+    // ── 帧棋子动画（碎片聚合 → 停顿 → 飞行缩放）—— 最上层渲染 ──
+    if (fpAnimState != FramePieceAnimState::IDLE && fpAnimTex && fpAnimTex->getSize().x > 0) {
+        float t = fpAnimClock.getElapsedTime().asSeconds();
+        sf::Vector2f centerPos(1280.f, 720.f);
+        sf::Vector2u ts = fpAnimTex->getSize();
+        const float BIG_SCALE = 384.f / ts.x;
+        const float SMALL_SCALE = 96.f / ts.x;
+
+        if (fpAnimState == FramePieceAnimState::AGGREGATE) {
+            float rawT = t / 1.0f; if (rawT > 1.f) rawT = 1.f;
+            float wipeY = ts.y * rawT;
+            int visH = (int)wipeY;
+            if (visH > 0) {
+                sf::Sprite s(*fpAnimTex);
+                s.setOrigin({ts.x / 2.f, ts.y / 2.f});
+                s.setTextureRect(sf::IntRect({0, 0}, {(int)ts.x, visH}));
+                s.setScale({BIG_SCALE, BIG_SCALE});
+                s.setPosition(centerPos);
+                s.setColor(sf::Color::White);
+                window.draw(s);
+            }
+            if (!fpAnimInit) { fpAnimInit = true; }
+            for (auto& frag : fpAnimFrags) {
+                float fcx = frag.texRect.size.x / 2.f;
+                float fcy = frag.texRect.size.y / 2.f;
+                float tx = centerPos.x + (frag.texRect.position.x + fcx - ts.x / 2.f) * BIG_SCALE;
+                float ty = centerPos.y + (frag.texRect.position.y + fcy - ts.y / 2.f) * BIG_SCALE;
+                float fragTop = (float)frag.texRect.position.y;
+                if (!frag.released && fragTop < wipeY + ts.y * 0.06f && fragTop >= wipeY - ts.y * 0.02f) {
+                    frag.released = true;
+                    frag.targetPos = {tx, ty};
+                    frag.fadeTimer = 0.f;
+                    frag.pos.x = tx + (rand() % 60 - 30) * 1.f;
+                    frag.pos.y = ty + (rand() % 50 + 30) * 1.f;
+                }
+                if (frag.released) {
+                    frag.fadeTimer += 0.016f;
+                    float prog = frag.fadeTimer / 0.3f; if (prog > 1.f) prog = 1.f;
+                    float eased = prog * prog * (3.f - 2.f * prog);
+                    frag.pos.x += (frag.targetPos.x - frag.pos.x) * 0.12f;
+                    frag.pos.y += (frag.targetPos.y - frag.pos.y) * 0.12f;
+                    frag.alpha = 255.f * eased;
+                    sf::Sprite s(*fpAnimTex);
+                    s.setScale({BIG_SCALE, BIG_SCALE});
+                    s.setOrigin({fcx, fcy});
+                    s.setTextureRect(frag.texRect);
+                    s.setPosition(frag.pos);
+                    s.setRotation(sf::degrees(frag.rotation * (1.f - eased)));
+                    s.setColor(sf::Color(255, 255, 255, (uint8_t)frag.alpha));
+                    window.draw(s);
+                    float glow = (eased < 1.f) ? eased * 80.f : 0.f;
+                    if (glow > 0.f) {
+                        s.setColor(sf::Color((uint8_t)glow, (uint8_t)glow, (uint8_t)glow, (uint8_t)frag.alpha));
+                        window.draw(s, sf::BlendAdd);
+                    }
+                }
+            }
+            if (rawT >= 1.f) {
+                fpAnimState = FramePieceAnimState::HOLD;
+                fpAnimClock.restart();
+            }
+        }
+        else if (fpAnimState == FramePieceAnimState::HOLD) {
+            sf::Sprite s(*fpAnimTex);
+            s.setOrigin({ts.x / 2.f, ts.y / 2.f});
+            s.setScale({BIG_SCALE, BIG_SCALE});
+            s.setPosition(centerPos);
+            s.setColor(sf::Color::White);
+            window.draw(s);
+            if (t >= 0.5f) {
+                fpAnimState = FramePieceAnimState::FLY;
+                fpAnimClock.restart();
+            }
+        }
+        else if (fpAnimState == FramePieceAnimState::FLY) {
+            float rawT = t / 0.5f; if (rawT > 1.f) rawT = 1.f;
+            float eased = rawT * rawT * (3.f - 2.f * rawT);
+            float curX = centerPos.x + (fpAnimTargetX - centerPos.x) * eased;
+            float curY = centerPos.y + (fpAnimTargetY - centerPos.y) * eased;
+            float curScale = BIG_SCALE + (SMALL_SCALE - BIG_SCALE) * eased;
+            if (rawT >= 1.f) {
+                sf::Sprite& sp = (fpAnimColor == 1) ? chessboard.getBlackSprite()
+                                                    : chessboard.getWhiteSprite();
+                const sf::Texture& ttx = sp.getTexture();
+                float fs = 96.f / ttx.getSize().x;
+                sp.setScale({fs, fs});
+                sp.setPosition({fpAnimTargetX, fpAnimTargetY});
+                sp.setColor(sf::Color::White);
+                window.draw(sp);
+                completeFramePieceAnim();
+            } else {
+                sf::Sprite s(*fpAnimTex);
+                s.setOrigin({ts.x / 2.f, ts.y / 2.f});
+                s.setScale({curScale, curScale});
+                s.setPosition({curX, curY});
+                s.setColor(sf::Color::White);
+                window.draw(s);
+            }
+        }
+    }
+
     // ── 暂停覆盖层（淡入/淡出各 0.5s）──
     float fadeElapsed = pauseFadeClock.getElapsedTime().asSeconds();
     float fadeT = fadeElapsed / 0.5f;
@@ -4695,6 +4964,128 @@ void GameEngine::renderGameplay() {
                 uiText.setPosition({tx, ty});
                 window.draw(uiText);
             }
+        }
+    }
+}
+
+// ============================================================================
+// 🌟 【胜利制重构】帧棋子奖励 — 每次5连放一个棋子，集满5个获胜
+// ============================================================================
+// ============================================================================
+// 🌟 【帧棋子动画】入队待处理，若空闲则启动动画
+// ============================================================================
+void GameEngine::awardFramePiece(int scoringPlayer) {
+    pendingFramePieces.push_back({scoringPlayer});
+    std::cout << "[Frame] 待处理帧棋子: " << pendingFramePieces.size()
+              << " (scoringPlayer=" << scoringPlayer << ")" << std::endl;
+    if (fpAnimState == FramePieceAnimState::IDLE) {
+        startNextFramePieceAnim();
+    }
+}
+
+// ============================================================================
+// 🌟 【帧棋子动画】从队列取出，计算目标，初始化碎片
+// ============================================================================
+void GameEngine::startNextFramePieceAnim() {
+    if (pendingFramePieces.empty()) return;
+    auto pfp = pendingFramePieces.front();
+
+    // 确定归属（上框/下框）+ 目标槽位索引
+    int targetSlot; float targetY;
+    if (currentState == GameState::GAME_PVE) {
+        if (pfp.scoringPlayer == playerColorPref) {
+            targetSlot = playerFramePieces; targetY = 80.f;
+        } else {
+            targetSlot = enemyFramePieces; targetY = 1360.f;
+        }
+    } else { // GAME_PVP
+        if (pfp.scoringPlayer == 1) {
+            targetSlot = playerFramePieces; targetY = 80.f;
+        } else {
+            targetSlot = enemyFramePieces; targetY = 1360.f;
+        }
+    }
+    fpAnimTargetX = 1005.f + targetSlot * 138.f;
+    fpAnimTargetY = targetY;
+
+    // 棋子颜色
+    fpAnimColor = pfp.scoringPlayer;
+
+    // 选择 HR 纹理
+    fpAnimTex = (fpAnimColor == 1) ? &menuBlackTex : &menuWhiteTex;
+
+    // 初始化碎片：复制缓存，随机化起始位置
+    fpAnimFrags = (fpAnimColor == 1) ? fpFragCacheBlack : fpFragCacheWhite;
+    sf::Vector2f centerPos(1280.f, 720.f);
+    for (auto& frag : fpAnimFrags) {
+        frag.released = false; frag.alpha = 0.f; frag.fadeTimer = 0.f;
+        frag.rotation = (rand() % 40 - 20) * 1.f;
+        frag.pos.x = centerPos.x + (rand() % 300 - 150) * 1.f;
+        frag.pos.y = centerPos.y + (rand() % 200 + 100) * 1.f;
+    }
+    fpAnimInit = false;
+
+    fpAnimState = FramePieceAnimState::AGGREGATE;
+    fpAnimClock.restart();
+    isBusyAnimating = true;
+    std::cout << "[FrameAnim] 启动动画 color=" << fpAnimColor
+              << " target=(" << fpAnimTargetX << "," << fpAnimTargetY << ")" << std::endl;
+}
+
+// ============================================================================
+// 🌟 【帧棋子动画】动画完成，计数器 +1，检查胜负，处理队列
+// ============================================================================
+void GameEngine::completeFramePieceAnim() {
+    if (pendingFramePieces.empty()) return;
+    auto pfp = pendingFramePieces.front();
+    pendingFramePieces.erase(pendingFramePieces.begin());
+
+    // 计数器 +1
+    if (currentState == GameState::GAME_PVE) {
+        if (pfp.scoringPlayer == playerColorPref)
+            playerFramePieces++;
+        else
+            enemyFramePieces++;
+    } else { // GAME_PVP
+        if (pfp.scoringPlayer == 1)
+            playerFramePieces++;
+        else
+            enemyFramePieces++;
+    }
+
+    std::cout << "[Frame] 上框: " << playerFramePieces
+              << ", 下框: " << enemyFramePieces << std::endl;
+
+    // 胜负检查
+    bool isPVE = (currentState == GameState::GAME_PVE);
+    if (playerFramePieces >= 5) {
+        winReason = isPVE ? L"我方获胜" : L"黑方获胜";
+        isGameOver = true;
+        currentState = GameState::GAME_OVER;
+        chessboard.clearWinLine();
+        std::cout << "[Frame] 上框集满5个，" << (isPVE ? "玩家" : "黑方") << "获胜！" << std::endl;
+    } else if (enemyFramePieces >= 5) {
+        winReason = isPVE ? L"敌方获胜" : L"白方获胜";
+        isGameOver = true;
+        currentState = GameState::GAME_OVER;
+        chessboard.clearWinLine();
+        std::cout << "[Frame] 下框集满5个，" << (isPVE ? "AI" : "白方") << "获胜！" << std::endl;
+    }
+
+    // 清理当前动画状态
+    fpAnimState = FramePieceAnimState::IDLE;
+    fpAnimFrags.clear();
+
+    // 继续处理队列或恢复游戏
+    if (!isGameOver && !pendingFramePieces.empty()) {
+        startNextFramePieceAnim();
+    } else if (!isGameOver) {
+        isBusyAnimating = false;
+        settleActionPoints();
+        if (currentState == GameState::GAME_PVE && currentTurn != playerColorPref
+            && currentTurnActionPoints.size() == 1) {
+            isAiThinking = true;
+            aiThinkClock.restart();
         }
     }
 }
@@ -5539,6 +5930,38 @@ void GameEngine::addCrisisTime(float seconds) {
         std::cout << "[Audio] 危机触发 —— battle_02 延长 " << seconds
                   << "s，剩余 " << battle02Remaining << "s" << std::endl;
     }
+}
+
+// ── 帧棋子 HR 碎片缓存 ──
+void GameEngine::initFramePieceFragCache() {
+    auto gen = [](sf::Texture& tex, std::vector<Fragment>& out) {
+        out.clear();
+        sf::Vector2u ts = tex.getSize();
+        if (ts.x == 0 || ts.y == 0) return;
+        const int COLS = 36, ROWS = 36;  // 1296 fragments
+        float cw = (float)ts.x / COLS;
+        float rh = (float)ts.y / ROWS;
+        for (int r = 0; r < ROWS; ++r) {
+            for (int c = 0; c < COLS; ++c) {
+                Fragment f;
+                int rx = (int)(cw * c + cw * (rand() % 12 - 6) / 100.f);
+                int ry = (int)(rh * r + rh * (rand() % 6  - 3) / 100.f);
+                int rw = (int)(cw + cw * (rand() % 10 - 5) / 100.f);
+                int rh2 = (int)(rh + rh * (rand() % 6  - 3) / 100.f);
+                if (rx < 0) rx = 0; if (ry < 0) ry = 0;
+                if (rx + rw > (int)ts.x) rw = ts.x - rx;
+                if (ry + rh2 > (int)ts.y) rh2 = ts.y - ry;
+                if (rw < 1) rw = 1; if (rh2 < 1) rh2 = 1;
+                f.texRect = sf::IntRect({rx, ry}, {rw, rh2});
+                f.released = false; f.alpha = 255.f;
+                out.push_back(f);
+            }
+        }
+    };
+    gen(menuBlackTex, fpFragCacheBlack);
+    gen(menuWhiteTex, fpFragCacheWhite);
+    std::cout << "[FrameFragCache] HR碎片缓存: 黑=" << fpFragCacheBlack.size()
+              << " 白=" << fpFragCacheWhite.size() << std::endl;
 }
 
 // ── 卡牌碎片缓存 ──

@@ -8,15 +8,22 @@ DeckManager::DeckManager() {
 
 void DeckManager::initDeck() {
     deck.push_back({1, L"连击", L"给予两次落子数", CardEffect::FORCE_DROP, 0});
+    deck.push_back({1, L"连击", L"给予两次落子数", CardEffect::FORCE_DROP, 0});
+    deck.push_back({3, L"隐忍", L"迫使敌方承受：\n六子连星为胜途", CardEffect::CHANGE_WIN_RULE, 6});
     deck.push_back({3, L"隐忍", L"迫使敌方承受：\n六子连星为胜途", CardEffect::CHANGE_WIN_RULE, 6});
     deck.push_back({4, L"笼络", L"销毁己方一个棋子\n转化敌方一个棋子", CardEffect::CONVERT_PIECE, 0});
+    deck.push_back({4, L"笼络", L"销毁己方一个棋子\n转化敌方一个棋子", CardEffect::CONVERT_PIECE, 0});
     deck.push_back({5, L"破釜沉舟", L"将手牌放回牌库\n根据放回的数量\n销毁敌方棋子", CardEffect::SACRIFICE_HAND, 0});
+    deck.push_back({5, L"破釜沉舟", L"将手牌放回牌库\n根据放回的数量\n销毁敌方棋子", CardEffect::SACRIFICE_HAND, 0});
+    deck.push_back({6, L"疫病", L"指定一颗敌方棋子\n使其患上疫病\n患病棋子每回合都\n有概率死亡并试图\n传染给其他棋子\n玩家棋子也有患病\n风险", CardEffect::PLAGUE, 0});
     deck.push_back({6, L"疫病", L"指定一颗敌方棋子\n使其患上疫病\n患病棋子每回合都\n有概率死亡并试图\n传染给其他棋子\n玩家棋子也有患病\n风险", CardEffect::PLAGUE, 0});
     deck.push_back({7, L"隔离", L"使患病棋子在三回\n合后痊愈", CardEffect::QUARANTINE, 4});
     deck.push_back({7, L"隔离", L"使患病棋子在三回\n合后痊愈", CardEffect::QUARANTINE, 4});
     // 紫卡：盲目（cardColor=1, value=4 → 三回合后消退）
     deck.push_back({8, L"盲目", L"持有者将无法辨清\n自己的手牌\n三回合后消退\n且三子连星将导致\n消退时间延后", CardEffect::BLIND, 4, 1});
+    deck.push_back({8, L"盲目", L"持有者将无法辨清\n自己的手牌\n三回合后消退\n且三子连星将导致\n消退时间延后", CardEffect::BLIND, 4, 1});
     // 紫卡：以地事秦（cardColor=1, value=3 → 三回合后消退）
+    deck.push_back({9, L"以地事秦", L"持有者需要传送一\n张橙卡给出牌者\n不送牌则接下来三\n回合只能下棋\n送卡或撑过三回合\n后本牌消退", CardEffect::YIDISHIQIN, 3, 1});
     deck.push_back({9, L"以地事秦", L"持有者需要传送一\n张橙卡给出牌者\n不送牌则接下来三\n回合只能下棋\n送卡或撑过三回合\n后本牌消退", CardEffect::YIDISHIQIN, 3, 1});
 }
 

@@ -52,6 +52,12 @@ private:
     // 全屏控制
     void toggleFullscreen();
 
+    // 胜利帧棋子系统
+    void awardFramePiece(int scoringPlayer);
+    void startNextFramePieceAnim();
+    void completeFramePieceAnim();
+    void initFramePieceFragCache();
+
     // 🌟 【新增】分离的渲染函数
     void renderMenu();
     void renderPVEConfig();
@@ -63,6 +69,9 @@ private:
     // ===== UI 元素 =====
     sf::RenderWindow window;
     GameState currentState;
+    GameState nextState = GameState::MENU;   // 过渡目标状态
+    bool transitioning = false;              // 是否正在过渡
+    sf::Clock transitionClock;               // 过渡计时
     Chessboard chessboard;
     AIPlayer* aiPlayer;
 
@@ -70,6 +79,7 @@ private:
     bool isFullscreen = true;   // 默认无边框全屏
     sf::View gameView;          // 2560×1440 逻辑视图
     void applyViewport();       // 计算比例保持的 viewport
+    void requestStateChange(GameState target); // 1s淡入淡出过渡
     static const unsigned int WINDOW_WIDTH = 2560;
     static const unsigned int WINDOW_HEIGHT = 1440;
 
@@ -78,6 +88,8 @@ private:
     bool isProfessionalMode;
     std::wstring winReason;
     bool isGameOver;
+    int playerFramePieces = 0;           // 上方 ChessFrame 已放棋子数
+    int enemyFramePieces = 0;            // 下方 ChessFrame 已放棋子数
     bool showAIDebug = false;            // F10 开发者调试：AI 手牌
     bool playerInvincible = false;       // 调试：玩家无敌（AI 需 15 连）
     bool playerInvinciblePlus = false;   // 调试：无敌 Plus（双方均不可胜）
@@ -288,6 +300,21 @@ private:
     Card showcasedCard;                 // 存储被展示的卡牌数据（pop 后保留）
     sf::Clock showcaseClock;            // 展示阶段独立时钟
 
+    // 🌟 帧棋子动画状态机
+    enum class FramePieceAnimState { IDLE, AGGREGATE, HOLD, FLY };
+    FramePieceAnimState fpAnimState = FramePieceAnimState::IDLE;
+    sf::Clock fpAnimClock;
+    int  fpAnimColor = 0;               // 1=黑, 2=白
+    float fpAnimTargetX = 0.f;         // ChessFrame 目标落点 X
+    float fpAnimTargetY = 0.f;         // ChessFrame 目标落点 Y
+    bool  fpAnimInit = false;          // AGGREGATE 碎片初始化标记
+    std::vector<Fragment> fpAnimFrags; // 当前动画碎片（运行时）
+    sf::Texture* fpAnimTex = nullptr;  // 指向 menuBlackTex 或 menuWhiteTex
+    std::vector<Fragment> fpFragCacheBlack; // black_HR 碎片预缓存
+    std::vector<Fragment> fpFragCacheWhite; // white_HR 碎片预缓存
+    struct PendingFramePiece { int scoringPlayer; };
+    std::vector<PendingFramePiece> pendingFramePieces; // 待处理帧棋子队列
+
     // 🌟 AI 出牌动画状态机
     enum class AICardPlayState { IDLE, RISING, PAUSE_AT_CENTER, TO_READER, ANNIHILATING, SHOWCASING,
                                 PURPLE_FADE_OUT, PURPLE_SLOT_GEN };
@@ -347,6 +374,14 @@ private:
     bool        settingsMenuLoaded = false;
     sf::Texture virusTex;
     sf::Sprite  virusSpr{virusTex};
+    sf::Texture watchTex;
+    sf::Sprite  watchSpr{watchTex};
+    sf::Texture digitTex[10];
+    sf::Sprite* digitSpr[10] = {};
+    sf::Texture chessFrameTex;
+    sf::Sprite  chessFrameSpr{chessFrameTex};
+    sf::Texture blackHRTex;
+    sf::Sprite* blackHRSpr = nullptr;
     sf::Texture skullTex;
     sf::Sprite  skullSpr{skullTex};   // 笼络销毁阶段悬停预览
     sf::Texture ringTex;
