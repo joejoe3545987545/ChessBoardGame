@@ -1,0 +1,6 @@
+Mode: OTHER
+Date: 20260624_013358
+Result: Finished
+Moves:
+7 7 1
+6 7 2
